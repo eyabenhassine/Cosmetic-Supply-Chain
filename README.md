@@ -1,4 +1,4 @@
-# 🧠📦 Cosmetic Supply Chain Intelligence
+# 🧠📦💄 Cosmetic Supply Chain Optimization – BI & AI Project
 
 An end-to-end solution that integrates **Business Intelligence (BI)**, **Artificial Intelligence (AI)**, and **Data Analytics** to optimize the **cosmetic supply chain** and support data-driven decisions.
 
@@ -90,7 +90,7 @@ It combines technical, analytical, and innovative approaches to support smart su
 ## 👨‍💻 Author
 
 **Eya Ben Hassine**  
-Engineering Student, Data/AI Track  
+Engineering Student  – Business Intelligence Track  
 📧 eyabenhassine@esprit.tn  
 🔗 [LinkedIn Profile](https://www.linkedin.com/in/ben-hassine-eya-b03726279/)
 
