@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Menu Principal - Analyse des Données</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            text-align: center;
+        }
+        h1 {
+            color: #333;
+        }
+        .menu {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            margin-top: 30px;
+        }
+        .menu a {
+            background-color: #4CAF50;
+            color: white;
+            padding: 15px;
+            text-decoration: none;
+            border-radius: 5px;
+            font-size: 18px;
+        }
+        .menu a:hover {
+            background-color: #45a049;
+        }
+        .error {
+            color: red;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Menu Principal - Axes d'Analyse</h1>
+    <div class="menu">
+        <a href="/axis/sales">Sales</a>
+        <a href="/axis/production">Production</a>
+        <a href="/axis/stock">Stock</a>
+    </div>
+    {% if error %}
+    <p class="error">{{ error }}</p>
+    {% endif %}
+</body>
+</html>

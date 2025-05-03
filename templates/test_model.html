@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Model - {{ axis|capitalize }}</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f0f4f8;
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            color: #555;
+        }
+        input, select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        button {
+            background-color: #007bff;
+            color: #fff;
+            padding: 10px 15px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            width: 100%;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        .result {
+            margin-top: 20px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background-color: #f9f9f9;
+        }
+        .graphic img {
+            max-width: 100%;
+            height: auto;
+            margin-top: 10px;
+        }
+        .back-button {
+            display: inline-block;
+            margin-top: 20px;
+            padding: 10px 15px;
+            background-color: #6c757d;
+            color: #fff;
+            text-decoration: none;
+            border-radius: 4px;
+        }
+        .back-button:hover {
+            background-color: #5a6268;
+        }
+        .recommendation-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+        }
+        .recommendation-table th, .recommendation-table td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        .recommendation-table th {
+            background-color: #f2f2f2;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Tester {{ model_name }} - {{ axis|capitalize }}</h1>
+        <form method="POST" action="/test_model/{{ axis }}/{{ model_id }}">
+            {% for field in fields %}
+                <div class="form-group">
+                    <label for="{{ field }}">{{ field|capitalize }}:</label>
+                    {% if field == 'shop_id' %}
+                        <select id="{{ field }}" name="{{ field }}" required>
+                            {% for shop in shops %}
+                                <option value="{{ shop }}" {% if shop == shop_id %}selected{% endif %}>{{ shop }}</option>
+                            {% endfor %}
+                        </select>
+                    {% elif field == 'date' and model_id == 'time_series_forecast_sales' %}
+                        <input type="date" id="{{ field }}" name="{{ field }}" value="{{ date if date else '2025-06-01' }}" required min="2025-05-01" max="2026-12-31">
+                    {% else %}
+                        <input type="text" id="{{ field }}" name="{{ field }}" value="{{ request.form[field] if request.form[field] else '' }}" required>
+                    {% endif %}
+                </div>
+            {% endfor %}
+            <button type="submit">Prédire</button>
+        </form>
+
+        {% if prediction %}
+            <div class="result">
+                <h2>Résultat:</h2>
+                <div>{{ prediction|safe }}</div>
+                {% if graphic %}
+                    <div class="graphic">
+                        <img src="data:image/png;base64,{{ graphic }}" alt="Graphique des recommandations">
+                    </div>
+                {% endif %}
+            </div>
+        {% endif %}
+
+        <a href="/axis/{{ axis }}" class="back-button">Retour aux modèles</a>
+    </div>
+</body>
+</html>
