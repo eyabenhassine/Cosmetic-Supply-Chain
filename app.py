@@ -18,20 +18,18 @@ import os
 import warnings
 import traceback
 
-warnings.filterwarnings("ignore")  # Ignorer les avertissements pour simplifier
+warnings.filterwarnings("ignore")
 
 print("Starting app.py...")
 
-# Initialisation de l'application Flask
 app = Flask(__name__)
 print("Flask app initialized.")
 
-# Informations de connexion à la base de données
 host = "localhost"
 port = "5432"
 database = "DW_supplyChain"
 user = "postgres"
-password = "1234"  # Remplace par ton vrai mot de passe
+password = "1234"
 connection_string = f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}"
 print("Connecting to database...")
 try:
@@ -41,14 +39,13 @@ except Exception as e:
     print(f"Error connecting to database: {e}")
     engine = None
 
-# Fonction pour créer la matrice de recommandation (pour kNN)
+# Sales-related functions (unchanged)
 def create_recommendation_matrix(df):
     print("Creating recommendation matrix...")
     pivot_table = df.pivot_table(index='shop_id', columns='productname', values='total_quantity', fill_value=0)
     print("Recommendation matrix created.")
     return pivot_table
 
-# Fonction pour entraîner le modèle kNN
 def train_knn_model(pivot_table):
     print("Training kNN model...")
     knn_model = NearestNeighbors(metric='cosine')
@@ -56,7 +53,6 @@ def train_knn_model(pivot_table):
     print("kNN model trained.")
     return knn_model
 
-# Fonction pour obtenir les recommandations (kNN)
 def recommend_products_knn(shop_id, pivot_table, knn_model, top_n=5, n_neighbors=3):
     if shop_id not in pivot_table.index:
         return None, f"Shop ID {shop_id} non trouvé dans les données."
@@ -74,7 +70,6 @@ def recommend_products_knn(shop_id, pivot_table, knn_model, top_n=5, n_neighbors
     recommended_products = scores.sort_values(ascending=False).head(top_n)
     return recommended_products, None
 
-# Fonction pour générer un graphique des recommandations (kNN)
 def plot_recommendations(recommendations, shop_id):
     plt.figure(figsize=(10, 6))
     recommendations.plot(kind='bar', color='dodgerblue')
@@ -95,10 +90,8 @@ def plot_recommendations(recommendations, shop_id):
     graphic = base64.b64encode(image_png).decode('utf-8')
     return graphic
 
-# Fonction pour entraîner et sauvegarder le modèle SARIMA
 def train_sarima_model():
     print("Training SARIMA model...")
-    # Charger le JSON
     json_path = os.path.join(os.path.dirname(__file__), 'orders_products_2022_2024.json')
     print(f"Looking for JSON file at: {json_path}")
     if not os.path.exists(json_path):
@@ -107,7 +100,6 @@ def train_sarima_model():
     data = pd.read_json(json_path)
     print("JSON file loaded.")
     
-    # Étape 1 : Extraire les produits et quantités
     products = []
     for order in data.to_dict('records'):
         order_date = pd.to_datetime(order['OrderDate'])
@@ -118,7 +110,6 @@ def train_sarima_model():
     products_df = pd.DataFrame(products)
     print("Products DataFrame created.")
     
-    # Étape 2 : Agréger par produit et par mois
     products_df['order_date'] = pd.to_datetime(products_df['order_date'])
     products_df['month'] = products_df['order_date'].dt.to_period('M')
     monthly_demand = products_df.groupby(['productid', 'month'])['quantity'].sum().reset_index()
@@ -130,22 +121,20 @@ def train_sarima_model():
     monthly_demand['month'] = monthly_demand['month'].dt.to_timestamp()
     monthly_demand['month_of_year'] = monthly_demand['month'].dt.month
     
-    # Étape 3 : Préparer les prédictions pour chaque produit (limiter aux 100 premiers produits)
     all_predictions = []
     historical_data = []
-    product_ids = monthly_demand['productid'].unique()[:100]  # Prendre seulement les 100 premiers produits
+    product_ids = monthly_demand['productid'].unique()[:100]
     print(f"Number of unique product IDs to process: {len(product_ids)}")
     for i, product_id in enumerate(product_ids):
         print(f"Processing product ID {product_id} ({i+1}/{len(product_ids)})")
         product_data = monthly_demand[monthly_demand['productid'] == product_id].copy()
         print(f"Data for product ID {product_id}:\n{product_data[['month', 'quantity']].to_string()}")
         
-        # Vérifier les doublons dans 'month' et agréger si nécessaire
         if product_data['month'].duplicated().any():
             print(f"Duplicate months found for product ID {product_id}, aggregating data...")
             product_data = product_data.groupby('month')['quantity'].sum().reset_index()
         
-        if len(product_data) < 12:  # Réduire à 12 mois pour inclure plus de produits
+        if len(product_data) < 12:
             print(f"Skipping product ID {product_id} due to insufficient data (<12 months)")
             continue
         
@@ -160,7 +149,6 @@ def train_sarima_model():
             print(f"Skipping product ID {product_id} due to insufficient data (<2 points) or non-monotonic index")
             continue
         
-        # Vérifier si toutes les valeurs sont identiques (aucune variation)
         if product_data_ts.nunique() == 1:
             print(f"Skipping product ID {product_id} due to no variation in data (all values are {product_data_ts.iloc[0]})")
             continue
@@ -168,19 +156,17 @@ def train_sarima_model():
         print(f"Fitting SARIMA model for product_id {product_id}...")
         
         try:
-            # Essayer d'abord avec le modèle saisonnier
             try:
                 model = SARIMAX(product_data_ts, order=(1, 1, 0), seasonal_order=(1, 1, 0, 12))
                 model_fit = model.fit(disp=False)
             except Exception as e:
                 print(f"Seasonal SARIMA failed for product ID {product_id}: {e}, trying non-seasonal ARIMA...")
-                # Revenir à un modèle non saisonnier si le modèle saisonnier échoue
                 model = SARIMAX(product_data_ts, order=(1, 1, 0), seasonal_order=(0, 0, 0, 0))
                 model_fit = model.fit(disp=False)
             
             print(f"SARIMA model fitted for product ID {product_id}")
             
-            forecast_steps = 20  # Mai 2025 à Décembre 2026
+            forecast_steps = 20
             forecast = model_fit.forecast(steps=forecast_steps)
             print(f"Forecast generated for product ID {product_id}")
             
@@ -205,17 +191,14 @@ def train_sarima_model():
     historical_df = pd.concat(historical_data, ignore_index=True)
     historical_df = historical_df.rename(columns={'quantity': 'quantity'})
     
-    # Sauvegarder les données
     joblib.dump(predictions_df, 'sarima_forecast_sales.pkl')
     joblib.dump(historical_df, 'sarima_historical_sales.pkl')
     print("SARIMA model trained and saved.")
     
     return predictions_df, historical_df, None
 
-# Fonction pour générer les graphiques SARIMA
 def generate_sarima_plots(predictions_df, historical_df):
     print("Generating SARIMA plots...")
-    # Courbe globale
     historical_global = historical_df.groupby('month')['quantity'].sum().reset_index()
     historical_global['type'] = 'historical'
     predicted_global = predictions_df.groupby('month')['predicted_quantity'].sum().reset_index()
@@ -239,7 +222,6 @@ def generate_sarima_plots(predictions_df, historical_df):
     buffer1.close()
     plt.close()
     
-    # Histogramme
     plt.figure(figsize=(10, 6))
     sns.histplot(predictions_df['predicted_quantity'], bins=30, kde=True, color='skyblue')
     plt.title('Distribution des quantités prédites pour tous les produits (SARIMA, mai 2025 - déc 2026)')
@@ -257,7 +239,6 @@ def generate_sarima_plots(predictions_df, historical_df):
     buffer2.close()
     plt.close()
     
-    # Courbe saisonnière
     seasonal_data = historical_df.groupby('month_of_year')['quantity'].mean().reset_index()
     
     plt.figure(figsize=(12, 6))
@@ -280,10 +261,9 @@ def generate_sarima_plots(predictions_df, historical_df):
     print("SARIMA plots generated.")
     return curve_plot, hist_plot, seasonal_plot
 
-# Fonction pour entraîner et sauvegarder tous les modèles
 def train_and_save_models():
     print("Training all models...")
-    # --- Modèle Clustering_Sales (K-Means) ---
+    # Sales Models
     print("Training Clustering Sales model...")
     query_kmeans = """
     SELECT quantity, unit_price, total
@@ -300,7 +280,6 @@ def train_and_save_models():
     joblib.dump(kmeans, 'clustering_sales.pkl')
     print("Clustering Sales model trained.")
 
-    # --- Modèle Demand_Prediction_Sales (Random Forest) ---
     print("Training Demand Prediction Sales model...")
     query_rf = """
     SELECT "FK_shop", "FK_product", "quantity", "unit_price", "total", "FK_date"
@@ -320,7 +299,6 @@ def train_and_save_models():
     joblib.dump(rf, 'rf_sales_demand.pkl')
     print("Demand Prediction Sales model trained.")
 
-    # --- Modèle Product_Recommendation_Sales (kNN) ---
     print("Training Product Recommendation Sales model...")
     query_knn = """
     SELECT 
@@ -345,7 +323,6 @@ def train_and_save_models():
     joblib.dump(pivot_table, 'pivot_table_sales_recommendation.pkl')
     print("Product Recommendation Sales model trained.")
 
-    # --- Modèle Time_Series_Forecast_Sales (SARIMA) ---
     print("Training Time Series Forecast Sales model...")
     predictions_df, historical_df, sarima_error = train_sarima_model()
     if sarima_error:
@@ -353,9 +330,8 @@ def train_and_save_models():
         predictions_df, historical_df = None, None
     print("Time Series Forecast Sales model training completed.")
 
-    return scaler, kmeans, rf, knn_model, pivot_table, predictions_df, historical_df
+    return (scaler, kmeans, rf, knn_model, pivot_table, predictions_df, historical_df)
 
-# Vérifier si tous les fichiers .pkl existent, sinon entraîner et sauvegarder
 pkl_files = [
     'scaler_sales_clustering_sales.pkl',
     'clustering_sales.pkl',
@@ -368,7 +344,7 @@ pkl_files = [
 print("Checking for .pkl files...")
 if not all(os.path.exists(pkl) for pkl in pkl_files):
     print("Some .pkl files are missing. Training models...")
-    scaler, kmeans, rf, knn_model, pivot_table, predictions_df, historical_df = train_and_save_models()
+    (scaler, kmeans, rf, knn_model, pivot_table, predictions_df, historical_df) = train_and_save_models()
 else:
     print("Loading .pkl files...")
     scaler = joblib.load('scaler_sales_clustering_sales.pkl')
@@ -380,7 +356,6 @@ else:
     historical_df = joblib.load('sarima_historical_sales.pkl')
 print(".pkl files processed.")
 
-# Liste des shops pour le menu déroulant
 SHOPS = ['41', '61', '81']
 
 @app.route('/')
@@ -397,7 +372,10 @@ def axis(axis_name):
             {'id': 'time_series_forecast_sales', 'name': 'Time Series Forecast Sales'}
         ]
         return render_template('models.html', axis=axis_name, models=models)
-    elif axis_name.lower() in ['production', 'stock']:
+    elif axis_name.lower() == 'production':
+        models = []
+        return render_template('models.html', axis=axis_name, models=models)
+    elif axis_name.lower() == 'stock':
         return render_template('axis.html', axis=axis_name)
     else:
         return render_template('index.html', error="Axe non valide")
@@ -537,101 +515,33 @@ def test_product_recommendation_sales():
                          fields=['shop_id', 'n_neighbors', 'top_n'],
                          shops=SHOPS)
 
-@app.route('/test_model/sales/time_series_forecast_sales', methods=['GET', 'POST'])
+@app.route('/test_model/sales/time_series_forecast_sales', methods=['GET'])
 def test_time_series_forecast_sales():
-    product_id = None
-    date_str = None
-    
-    if request.method == 'POST':
-        product_id = request.form.get('product_id')
-        date_str = request.form.get('date')
-    elif request.method == 'GET':
-        product_id = request.args.get('product_id')
-        date_str = request.args.get('date')
-    
-    if not product_id or not date_str:
-        return render_template('test_model.html',
-                             axis='sales',
-                             model_name='Time Series Forecast Sales',
-                             model_id='time_series_forecast_sales',
-                             fields=['product_id', 'date'],
-                             prediction="Erreur : Veuillez fournir un product_id et une date (ex. ?product_id=PR-1103&date=2025-06-01)")
-
     try:
-        date = pd.to_datetime(date_str)
-        if historical_df is None:
+        if predictions_df is None or historical_df is None:
             return render_template('test_model.html',
                                  axis='sales',
                                  model_name='Time Series Forecast Sales',
                                  model_id='time_series_forecast_sales',
-                                 fields=['product_id', 'date'],
-                                 prediction="Erreur : Les données historiques ne sont pas disponibles.")
-
-        # Filtrer les données historiques pour le product_id spécifié
-        product_data = historical_df[historical_df['productid'] == product_id].copy()
-        if len(product_data) < 12:  # Réduire à 12 mois pour inclure plus de produits
-            return render_template('test_model.html',
-                                 axis='sales',
-                                 model_name='Time Series Forecast Sales',
-                                 model_id='time_series_forecast_sales',
-                                 fields=['product_id', 'date'],
-                                 prediction=f"Erreur : Insufficient data (<12 months) for product ID {product_id}")
-
-        product_data_ts = product_data.set_index('month')['quantity']
-        if product_data_ts.shape[0] < 2 or not product_data_ts.index.is_monotonic_increasing:
-            return render_template('test_model.html',
-                                 axis='sales',
-                                 model_name='Time Series Forecast Sales',
-                                 model_id='time_series_forecast_sales',
-                                 fields=['product_id', 'date'],
-                                 prediction=f"Erreur : Insufficient data (<2 points) or non-monotonic index for product ID {product_id}")
-
-        # Vérifier si toutes les valeurs sont identiques
-        if product_data_ts.nunique() == 1:
-            return render_template('test_model.html',
-                                 axis='sales',
-                                 model_name='Time Series Forecast Sales',
-                                 model_id='time_series_forecast_sales',
-                                 fields=['product_id', 'date'],
-                                 prediction=f"Erreur : No variation in data for product ID {product_id} (all values are {product_data_ts.iloc[0]})")
-
-        # Ajuster le modèle SARIMA
-        try:
-            model = SARIMAX(product_data_ts, order=(1, 1, 0), seasonal_order=(1, 1, 0, 12))
-            model_fit = model.fit(disp=False)
-        except Exception as e:
-            print(f"Seasonal SARIMA failed for product ID {product_id}: {e}, trying non-seasonal ARIMA...")
-            model = SARIMAX(product_data_ts, order=(1, 1, 0), seasonal_order=(0, 0, 0, 0))
-            model_fit = model.fit(disp=False)
-
-        # Prédire pour la date spécifiée
-        forecast_steps = (date - pd.to_datetime('2025-05-01')).days // 30 + 1  # Approximation en mois
-        if forecast_steps < 1:
-            return render_template('test_model.html',
-                                 axis='sales',
-                                 model_name='Time Series Forecast Sales',
-                                 model_id='time_series_forecast_sales',
-                                 fields=['product_id', 'date'],
-                                 prediction=f"Erreur : La date {date_str} est antérieure à mai 2025")
-
-        forecast = model_fit.forecast(steps=forecast_steps)[-1]  # Prendre la dernière valeur
-        predicted_quantity = round(forecast)
-
+                                 fields=[],
+                                 prediction="Erreur : Les données de prévision ou historiques ne sont pas disponibles.")
+        
+        curve_plot, hist_plot, seasonal_plot = generate_sarima_plots(predictions_df, historical_df)
+        
         return render_template('test_model.html',
                              axis='sales',
                              model_name='Time Series Forecast Sales',
                              model_id='time_series_forecast_sales',
-                             fields=['product_id', 'date'],
-                             prediction=f"Quantité prédite pour {product_id} le {date_str}: {predicted_quantity}",
-                             product_id=product_id,
-                             date=date_str)
-
+                             fields=[],
+                             curve_plot=curve_plot,
+                             hist_plot=hist_plot,
+                             seasonal_plot=seasonal_plot)
     except Exception as e:
         return render_template('test_model.html',
                              axis='sales',
                              model_name='Time Series Forecast Sales',
                              model_id='time_series_forecast_sales',
-                             fields=['product_id', 'date'],
+                             fields=[],
                              prediction=f"Erreur : {str(e)}")
 
 if __name__ == '__main__':

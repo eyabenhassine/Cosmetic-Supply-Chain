@@ -3,125 +3,160 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Test Model - {{ axis|capitalize }}</title>
+    <title>Tester {{ model_name }} - {{ axis|capitalize }}</title>
     <style>
         body {
             font-family: Arial, sans-serif;
-            background-color: #f0f4f8;
+            background-color: #f4f7f6;
             margin: 0;
-            padding: 20px;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
         }
         .container {
-            max-width: 800px;
-            margin: 0 auto;
-            background-color: #fff;
+            background-color: white;
             padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            width: 80%;
+            max-width: 600px;
+            text-align: center;
         }
         h1 {
             color: #333;
-            text-align: center;
+            margin-bottom: 20px;
         }
-        .form-group {
-            margin-bottom: 15px;
+        form {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
         }
         label {
-            display: block;
-            margin-bottom: 5px;
+            font-weight: bold;
             color: #555;
         }
         input, select {
-            width: 100%;
             padding: 8px;
             border: 1px solid #ddd;
-            border-radius: 4px;
+            border-radius: 5px;
+            width: 100%;
             box-sizing: border-box;
         }
         button {
+            padding: 10px;
             background-color: #007bff;
-            color: #fff;
-            padding: 10px 15px;
+            color: white;
             border: none;
-            border-radius: 4px;
+            border-radius: 5px;
             cursor: pointer;
-            width: 100%;
+            transition: background-color 0.3s;
         }
         button:hover {
             background-color: #0056b3;
         }
         .result {
             margin-top: 20px;
-            padding: 15px;
+            padding: 10px;
             border: 1px solid #ddd;
-            border-radius: 4px;
+            border-radius: 5px;
             background-color: #f9f9f9;
         }
-        .graphic img {
-            max-width: 100%;
-            height: auto;
+        .result p {
+            margin: 0;
+            color: #333;
+        }
+        .error {
+            color: red;
             margin-top: 10px;
         }
         .back-button {
-            display: inline-block;
             margin-top: 20px;
-            padding: 10px 15px;
+            padding: 10px;
             background-color: #6c757d;
-            color: #fff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
             text-decoration: none;
-            border-radius: 4px;
+            display: inline-block;
+            transition: background-color 0.3s;
         }
         .back-button:hover {
             background-color: #5a6268;
         }
+        img {
+            max-width: 100%;
+            margin-top: 20px;
+        }
         .recommendation-table {
             width: 100%;
             border-collapse: collapse;
-            margin-top: 10px;
+            margin-top: 20px;
         }
         .recommendation-table th, .recommendation-table td {
             border: 1px solid #ddd;
             padding: 8px;
-            text-align: left;
+            text-align: center;
         }
         .recommendation-table th {
             background-color: #f2f2f2;
+            color: #333;
         }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>Tester {{ model_name }} - {{ axis|capitalize }}</h1>
-        <form method="POST" action="/test_model/{{ axis }}/{{ model_id }}">
+
+        {% if fields and fields|length > 0 %}
+        <form method="POST">
             {% for field in fields %}
-                <div class="form-group">
-                    <label for="{{ field }}">{{ field|capitalize }}:</label>
-                    {% if field == 'shop_id' %}
-                        <select id="{{ field }}" name="{{ field }}" required>
-                            {% for shop in shops %}
-                                <option value="{{ shop }}" {% if shop == shop_id %}selected{% endif %}>{{ shop }}</option>
-                            {% endfor %}
-                        </select>
-                    {% elif field == 'date' and model_id == 'time_series_forecast_sales' %}
-                        <input type="date" id="{{ field }}" name="{{ field }}" value="{{ date if date else '2025-06-01' }}" required min="2025-05-01" max="2026-12-31">
-                    {% else %}
-                        <input type="text" id="{{ field }}" name="{{ field }}" value="{{ request.form[field] if request.form[field] else '' }}" required>
-                    {% endif %}
-                </div>
+            <div>
+                <label for="{{ field }}">{{ field|replace('_', ' ')|capitalize }}:</label>
+                {% if field == 'FK_shop' %}
+                <select id="{{ field }}" name="{{ field }}" required>
+                    {% for shop in shops %}
+                    <option value="{{ shop }}" {% if shop == FK_shop %}selected{% endif %}>{{ shop }}</option>
+                    {% endfor %}
+                </select>
+                {% elif field == 'date' %}
+                <input type="date" id="{{ field }}" name="{{ field }}" value="{{ date if date else '2025-06-01' }}" required>
+                {% else %}
+                <input type="{{ 'number' if field in ['quantity', 'unit_price', 'total', 'n_neighbors', 'top_n', 'month', 'FK_product'] else 'text' }}"
+                       id="{{ field }}"
+                       name="{{ field }}"
+                       value="{{ request.form[field] if request.form[field] else '' }}"
+                       required>
+                {% endif %}
+            </div>
             {% endfor %}
             <button type="submit">Prédire</button>
         </form>
+        {% endif %}
 
         {% if prediction %}
-            <div class="result">
-                <h2>Résultat:</h2>
-                <div>{{ prediction|safe }}</div>
-                {% if graphic %}
-                    <div class="graphic">
-                        <img src="data:image/png;base64,{{ graphic }}" alt="Graphique des recommandations">
-                    </div>
-                {% endif %}
-            </div>
+        <div class="result">
+            <h2>Résultat:</h2>
+            <p>{{ prediction|safe }}</p>
+        </div>
+        {% endif %}
+
+        {% if graphic %}
+        <img src="data:image/png;base64,{{ graphic }}" alt="Graphique de recommandations">
+        {% endif %}
+
+        {% if curve_plot %}
+        <img src="data:image/png;base64,{{ curve_plot }}" alt="Courbe historique et prédite">
+        {% endif %}
+
+        {% if hist_plot %}
+        <img src="data:image/png;base64,{{ hist_plot }}" alt="Histogramme des quantités prédites">
+        {% endif %}
+
+        {% if seasonal_plot %}
+        <img src="data:image/png;base64,{{ seasonal_plot }}" alt="Variation saisonnière">
         {% endif %}
 
         <a href="/axis/{{ axis }}" class="back-button">Retour aux modèles</a>
