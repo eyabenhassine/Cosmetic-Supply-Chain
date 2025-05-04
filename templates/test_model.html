@@ -21,10 +21,10 @@
             border-radius: 10px;
             box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
             width: 80%;
-            max-width: 600px;
+            max-width: 800px;
             text-align: center;
         }
-        h1 {
+        h1, h2, h3 {
             color: #333;
             margin-bottom: 20px;
         }
@@ -111,7 +111,7 @@
         <h1>Tester {{ model_name }} - {{ axis|capitalize }}</h1>
 
         {% if fields and fields|length > 0 %}
-        <form method="POST">
+        <form action="/predict/{{ axis }}/{{ model_id }}" method="POST">
             {% for field in fields %}
             <div>
                 <label for="{{ field }}">{{ field|replace('_', ' ')|capitalize }}:</label>
@@ -121,8 +121,22 @@
                     <option value="{{ shop }}" {% if shop == FK_shop %}selected{% endif %}>{{ shop }}</option>
                     {% endfor %}
                 </select>
+                {% elif field == 'shop_name' %}
+                <select id="{{ field }}" name="{{ field }}" required>
+                    {% for shop_id, shop_name in shop_mapping.items() %}
+                    <option value="{{ shop_name }}" {% if shop_name == shop_name %}selected{% endif %}>{{ shop_name }}</option>
+                    {% endfor %}
+                </select>
+                {% elif field == 'product_name' %}
+                <select id="{{ field }}" name="{{ field }}" required>
+                    {% for product_name in product_names %}
+                    <option value="{{ product_name }}" {% if product_name == product_name %}selected{% endif %}>{{ product_name }}</option>
+                    {% endfor %}
+                </select>
                 {% elif field == 'date' %}
                 <input type="date" id="{{ field }}" name="{{ field }}" value="{{ date if date else '2025-06-01' }}" required>
+                {% elif field == 'quantity_used' %}
+                <input type="number" id="{{ field }}" name="{{ field }}" step="any" value="{{ quantity_used if quantity_used else '' }}" required>
                 {% else %}
                 <input type="{{ 'number' if field in ['quantity', 'unit_price', 'total', 'n_neighbors', 'top_n', 'month', 'FK_product'] else 'text' }}"
                        id="{{ field }}"
@@ -134,6 +148,16 @@
             {% endfor %}
             <button type="submit">Prédire</button>
         </form>
+        {% endif %}
+
+        {% if cluster_counts %}
+        <h3>Répartition des produits</h3>
+        <div>{{ cluster_counts|safe }}</div>
+        {% endif %}
+
+        {% if preview %}
+        <h3>Aperçu des produits</h3>
+        <div>{{ preview|safe }}</div>
         {% endif %}
 
         {% if prediction %}

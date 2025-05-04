@@ -2,7 +2,7 @@ import pandas as pd
 import joblib
 from flask import Flask, request, render_template
 import numpy as np
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from sklearn.cluster import KMeans
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
@@ -10,6 +10,8 @@ from imblearn.over_sampling import SMOTE
 from sqlalchemy import create_engine
 from sklearn.neighbors import NearestNeighbors
 from statsmodels.tsa.statespace.sarimax import SARIMAX
+import matplotlib
+matplotlib.use('Agg')  # Utiliser le backend Agg pour éviter les erreurs Tkinter
 import matplotlib.pyplot as plt
 import seaborn as sns
 import io
@@ -330,7 +332,67 @@ def train_and_save_models():
         predictions_df, historical_df = None, None
     print("Time Series Forecast Sales model training completed.")
 
-    return (scaler, kmeans, rf, knn_model, pivot_table, predictions_df, historical_df)
+    # Production Model: K-Means Clustering
+    print("Training Clustering Production model...")
+    query_kmeans_prod = """
+    SELECT 
+        f."FK_product",
+        f."FK_base_material",
+        f."QuantityUsed",
+        p."PK_Products",
+        p."productname",
+        m."PK_Base_Materials",
+        m."Material_Name"
+    FROM "Fact_Production" f
+    JOIN "Dim_Cosmetic_Products" p ON f."FK_product" = p."PK_Products"
+    JOIN "Dim_Base_Materials" m ON f."FK_base_material" = m."PK_Base_Materials"
+    """
+    merged = pd.read_sql(query_kmeans_prod, engine) if engine else pd.DataFrame({
+        'FK_product': [1, 2, 1, 3, 2],
+        'FK_base_material': [101, 102, 101, 103, 102],
+        'QuantityUsed': ['[10.0]', '[20.0]', '[15.0]', '[25.0]', '[30.0]'],
+        'PK_Products': [1, 2, 1, 3, 2],
+        'productname': ['ProductA', 'ProductB', 'ProductA', 'ProductC', 'ProductB'],
+        'PK_Base_Materials': [101, 102, 101, 103, 102],
+        'Material_Name': ['Material1', 'Material2', 'Material1', 'Material3', 'Material2']
+    })
+
+    def convert_to_float(value):
+        try:
+            if isinstance(value, str):
+                value = value.strip("[]")
+                value_list = value.split(",")
+                floats = [float(x.strip()) for x in value_list if x.strip() != '']
+                return sum(floats) / len(floats) if floats else None
+            return float(value)
+        except Exception as e:
+            print(f"Erreur: {value} -> {e}")
+            return None
+
+    merged['QuantityUsed'] = merged['QuantityUsed'].apply(convert_to_float)
+    merged['QuantityUsed'] = merged['QuantityUsed'].fillna(merged['QuantityUsed'].median())
+    product_consumption = merged.groupby(['FK_product', 'productname'])['QuantityUsed'].sum().reset_index()
+    product_consumption.columns = ['ProductID', 'ProductName', 'TotalConsumption']
+    
+    scaler_prod = MinMaxScaler()
+    product_consumption['TotalConsumption_scaled'] = scaler_prod.fit_transform(product_consumption[['TotalConsumption']])
+    kmeans_prod = KMeans(n_clusters=2, random_state=42)
+    kmeans_prod.fit(product_consumption[['TotalConsumption_scaled']])
+    
+    # Déterminer les étiquettes des clusters
+    product_consumption['Cluster'] = kmeans_prod.labels_
+    cluster_means = product_consumption.groupby('Cluster')['TotalConsumption'].mean()
+    low_cluster = cluster_means.idxmin()
+    cluster_labels = {low_cluster: "Faible consommation", 1-low_cluster: "Forte consommation"}
+    product_consumption['Consommation'] = product_consumption['Cluster'].map(cluster_labels)
+    
+    joblib.dump(scaler_prod, 'scaler_production_clustering.pkl')
+    joblib.dump(kmeans_prod, 'clustering_production.pkl')
+    joblib.dump(cluster_labels, 'cluster_labels_production.pkl')
+    joblib.dump(product_consumption, 'product_consumption.pkl')
+    print("Clustering Production model trained.")
+
+    return (scaler, kmeans, rf, knn_model, pivot_table, predictions_df, historical_df, scaler_prod, kmeans_prod, cluster_labels, product_consumption)
 
 pkl_files = [
     'scaler_sales_clustering_sales.pkl',
@@ -339,12 +401,16 @@ pkl_files = [
     'knn_sales_recommendation.pkl',
     'pivot_table_sales_recommendation.pkl',
     'sarima_forecast_sales.pkl',
-    'sarima_historical_sales.pkl'
+    'sarima_historical_sales.pkl',
+    'scaler_production_clustering.pkl',
+    'clustering_production.pkl',
+    'cluster_labels_production.pkl',
+    'product_consumption.pkl'
 ]
 print("Checking for .pkl files...")
 if not all(os.path.exists(pkl) for pkl in pkl_files):
     print("Some .pkl files are missing. Training models...")
-    (scaler, kmeans, rf, knn_model, pivot_table, predictions_df, historical_df) = train_and_save_models()
+    (scaler, kmeans, rf, knn_model, pivot_table, predictions_df, historical_df, scaler_prod, kmeans_prod, cluster_labels, product_consumption) = train_and_save_models()
 else:
     print("Loading .pkl files...")
     scaler = joblib.load('scaler_sales_clustering_sales.pkl')
@@ -354,9 +420,31 @@ else:
     pivot_table = joblib.load('pivot_table_sales_recommendation.pkl')
     predictions_df = joblib.load('sarima_forecast_sales.pkl')
     historical_df = joblib.load('sarima_historical_sales.pkl')
+    scaler_prod = joblib.load('scaler_production_clustering.pkl')
+    kmeans_prod = joblib.load('clustering_production.pkl')
+    cluster_labels = joblib.load('cluster_labels_production.pkl')
+    product_consumption = joblib.load('product_consumption.pkl')
 print(".pkl files processed.")
 
 SHOPS = ['41', '61', '81']
+SHOP_MAPPING = {
+    '41': 'Magasin Paris',
+    '61': 'Magasin Lyon',
+    '81': 'Magasin Marseille'
+}
+
+# Récupérer la liste des ProductName
+try:
+    query_products = """
+    SELECT DISTINCT productname
+    FROM public."Dim_Cosmetic_Products"
+    WHERE productname IS NOT NULL
+    """
+    products_df = pd.read_sql(query_products, engine)
+    PRODUCT_NAMES = products_df['productname'].tolist()
+except Exception as e:
+    print(f"Erreur lors de la récupération des ProductName: {e}")
+    PRODUCT_NAMES = ['Hair Serum 1', 'Body Wash 2', 'Foot Cream 3', 'Conditioner 4', 'Eau de Toilette 5']  # Valeurs par défaut
 
 @app.route('/')
 def home():
@@ -373,7 +461,9 @@ def axis(axis_name):
         ]
         return render_template('models.html', axis=axis_name, models=models)
     elif axis_name.lower() == 'production':
-        models = []
+        models = [
+            {'id': 'clustering_production', 'name': 'Clustering Production'}
+        ]
         return render_template('models.html', axis=axis_name, models=models)
     elif axis_name.lower() == 'stock':
         return render_template('axis.html', axis=axis_name)
@@ -447,18 +537,21 @@ def test_demand_prediction_sales():
                          axis='sales', 
                          model_name='Demand Prediction Sales', 
                          model_id='demand_prediction_sales', 
-                         fields=['unit_price', 'total', 'FK_shop', 'FK_product', 'month'])
+                         fields=['unit_price', 'total', 'FK_shop', 'FK_product', 'month'],
+                         shops=SHOPS)
 
 @app.route('/test_model/sales/product_recommendation_sales', methods=['GET', 'POST'])
 def test_product_recommendation_sales():
     if request.method == 'POST':
         try:
-            shop_id = int(request.form['shop_id'])
+            shop_name = request.form['shop_name']
+            # Convertir shop_name en shop_id
+            shop_id = next(key for key, value in SHOP_MAPPING.items() if value == shop_name)
             n_neighbors = int(request.form['n_neighbors'])
             top_n = int(request.form['top_n'])
 
             recommendations, error = recommend_products_knn(
-                shop_id=shop_id,
+                shop_id=int(shop_id),
                 pivot_table=pivot_table,
                 knn_model=knn_model,
                 top_n=top_n,
@@ -470,10 +563,10 @@ def test_product_recommendation_sales():
                                      axis='sales',
                                      model_name='Product Recommendation Sales',
                                      model_id='product_recommendation_sales',
-                                     fields=['shop_id', 'n_neighbors', 'top_n'],
-                                     shops=SHOPS,
+                                     fields=['shop_name', 'n_neighbors', 'top_n'],
+                                     shop_mapping=SHOP_MAPPING,
                                      prediction=f'Erreur: {error}',
-                                     shop_id=shop_id,
+                                     shop_name=shop_name,
                                      n_neighbors=n_neighbors,
                                      top_n=top_n)
 
@@ -490,11 +583,11 @@ def test_product_recommendation_sales():
                                  axis='sales',
                                  model_name='Product Recommendation Sales',
                                  model_id='product_recommendation_sales',
-                                 fields=['shop_id', 'n_neighbors', 'top_n'],
-                                 shops=SHOPS,
+                                 fields=['shop_name', 'n_neighbors', 'top_n'],
+                                 shop_mapping=SHOP_MAPPING,
                                  prediction=table_html,
                                  graphic=graphic,
-                                 shop_id=shop_id,
+                                 shop_name=shop_name,
                                  n_neighbors=n_neighbors,
                                  top_n=top_n)
         except Exception as e:
@@ -502,18 +595,18 @@ def test_product_recommendation_sales():
                                  axis='sales',
                                  model_name='Product Recommendation Sales',
                                  model_id='product_recommendation_sales',
-                                 fields=['shop_id', 'n_neighbors', 'top_n'],
-                                 shops=SHOPS,
+                                 fields=['shop_name', 'n_neighbors', 'top_n'],
+                                 shop_mapping=SHOP_MAPPING,
                                  prediction=f'Erreur: {str(e)}',
-                                 shop_id=request.form.get('shop_id', ''),
+                                 shop_name=request.form.get('shop_name', ''),
                                  n_neighbors=request.form.get('n_neighbors', ''),
                                  top_n=request.form.get('top_n', ''))
     return render_template('test_model.html',
                          axis='sales',
                          model_name='Product Recommendation Sales',
                          model_id='product_recommendation_sales',
-                         fields=['shop_id', 'n_neighbors', 'top_n'],
-                         shops=SHOPS)
+                         fields=['shop_name', 'n_neighbors', 'top_n'],
+                         shop_mapping=SHOP_MAPPING)
 
 @app.route('/test_model/sales/time_series_forecast_sales', methods=['GET'])
 def test_time_series_forecast_sales():
@@ -543,6 +636,115 @@ def test_time_series_forecast_sales():
                              model_id='time_series_forecast_sales',
                              fields=[],
                              prediction=f"Erreur : {str(e)}")
+
+@app.route('/test_model/production/clustering_production', methods=['GET', 'POST'])
+def test_clustering_production():
+    # Préparer la répartition des clusters
+    cluster_counts = product_consumption['Consommation'].value_counts().to_dict()
+    cluster_counts_html = '<table class="recommendation-table">'
+    cluster_counts_html += '<thead><tr><th>Consommation</th><th>Nombre de produits</th></tr></thead>'
+    cluster_counts_html += '<tbody>'
+    for cons, count in cluster_counts.items():
+        cluster_counts_html += f'<tr><td>{cons}</td><td>{count}</td></tr>'
+    cluster_counts_html += '</tbody></table>'
+
+    # Préparer l'aperçu des produits (5 premiers)
+    preview_data = product_consumption[['ProductName', 'TotalConsumption', 'Consommation']].head(5)
+    preview_html = '<table class="recommendation-table">'
+    preview_html += '<thead><tr><th>ProductName</th><th>TotalConsumption</th><th>Consommation</th></tr></thead>'
+    preview_html += '<tbody>'
+    for _, row in preview_data.iterrows():
+        preview_html += f'<tr><td>{row["ProductName"]}</td><td>{row["TotalConsumption"]:.1f}</td><td>{row["Consommation"]}</td></tr>'
+    preview_html += '</tbody></table>'
+
+    if request.method == 'POST':
+        try:
+            product_name = request.form['product_name']
+            quantity_used = float(request.form['quantity_used'])
+            input_data = pd.DataFrame([[quantity_used]], columns=['TotalConsumption'])
+            input_scaled = scaler_prod.transform(input_data)
+            cluster = kmeans_prod.predict(input_scaled)[0]
+            cluster_label = cluster_labels.get(cluster, f"Cluster {cluster}")
+            prediction = f'Produit: {product_name}, Consommation: {cluster_label} pour QuantityUsed = {quantity_used}'
+            return render_template('test_model.html',
+                                 axis='production',
+                                 model_name='Clustering Production',
+                                 model_id='clustering_production',
+                                 fields=['product_name', 'quantity_used'],
+                                 product_names=PRODUCT_NAMES,
+                                 cluster_counts=cluster_counts_html,
+                                 preview=preview_html,
+                                 prediction=prediction,
+                                 product_name=product_name,
+                                 quantity_used=quantity_used)
+        except Exception as e:
+            return render_template('test_model.html',
+                                 axis='production',
+                                 model_name='Clustering Production',
+                                 model_id='clustering_production',
+                                 fields=['product_name', 'quantity_used'],
+                                 product_names=PRODUCT_NAMES,
+                                 cluster_counts=cluster_counts_html,
+                                 preview=preview_html,
+                                 prediction=f'Erreur: {str(e)}')
+    return render_template('test_model.html',
+                         axis='production',
+                         model_name='Clustering Production',
+                         model_id='clustering_production',
+                         fields=['product_name', 'quantity_used'],
+                         product_names=PRODUCT_NAMES,
+                         cluster_counts=cluster_counts_html,
+                         preview=preview_html)
+
+@app.route('/predict/production/clustering_production', methods=['POST'])
+def predict_clustering_production():
+    # Préparer la répartition des clusters
+    cluster_counts = product_consumption['Consommation'].value_counts().to_dict()
+    cluster_counts_html = '<table class="recommendation-table">'
+    cluster_counts_html += '<thead><tr><th>Consommation</th><th>Nombre de produits</th></tr></thead>'
+    cluster_counts_html += '<tbody>'
+    for cons, count in cluster_counts.items():
+        cluster_counts_html += f'<tr><td>{cons}</td><td>{count}</td></tr>'
+    cluster_counts_html += '</tbody></table>'
+
+    # Préparer l'aperçu des produits (5 premiers)
+    preview_data = product_consumption[['ProductName', 'TotalConsumption', 'Consommation']].head(5)
+    preview_html = '<table class="recommendation-table">'
+    preview_html += '<thead><tr><th>ProductName</th><th>TotalConsumption</th><th>Consommation</th></tr></thead>'
+    preview_html += '<tbody>'
+    for _, row in preview_data.iterrows():
+        preview_html += f'<tr><td>{row["ProductName"]}</td><td>{row["TotalConsumption"]:.1f}</td><td>{row["Consommation"]}</td></tr>'
+    preview_html += '</tbody></table>'
+
+    try:
+        product_name = request.form['product_name']
+        quantity_used = float(request.form['quantity_used'])
+        input_data = pd.DataFrame([[quantity_used]], columns=['TotalConsumption'])
+        input_scaled = scaler_prod.transform(input_data)
+        cluster = kmeans_prod.predict(input_scaled)[0]
+        cluster_label = cluster_labels.get(cluster, f"Cluster {cluster}")
+        prediction = f'Produit: {product_name}, Consommation: {cluster_label} pour QuantityUsed = {quantity_used}'
+        return render_template('test_model.html',
+                             axis='production',
+                             model_name='Clustering Production',
+                             model_id='clustering_production',
+                             fields=['product_name', 'quantity_used'],
+                             product_names=PRODUCT_NAMES,
+                             cluster_counts=cluster_counts_html,
+                             preview=preview_html,
+                             prediction=prediction,
+                             product_name=product_name,
+                             quantity_used=quantity_used)
+    except Exception as e:
+        return render_template('test_model.html',
+                             axis='production',
+                             model_name='Clustering Production',
+                             model_id='clustering_production',
+                             fields=['product_name', 'quantity_used'],
+                             product_names=PRODUCT_NAMES,
+                             cluster_counts=cluster_counts_html,
+                             preview=preview_html,
+                             prediction=f'Erreur: {str(e)}')
 
 if __name__ == '__main__':
     print("Starting Flask server...")
