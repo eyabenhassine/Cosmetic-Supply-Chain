@@ -53,8 +53,8 @@ README.md
 
 | Layer              | Tools / Technologies                                     |
 |--------------------|----------------------------------------------------------|
-| **ETL**            | SSIS, Talend                                             |
-| **Data Warehouse** | SQL Server, Snowflake schema                            |
+| **ETL**            | Talend                                             |
+| **Data Warehouse** | PostgreSql, Snowflake schema                            |
 | **ML/AI**          | Python, pandas, scikit-learn, XGBoost                   |
 | **Visualization**  | Power BI, Matplotlib, Seaborn                           |
 | **Web Application**| Flask (Python)                                          |
