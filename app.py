@@ -860,9 +860,15 @@ def test_material_consumption_classification():
     if request.method == 'POST':
         try:
             product_name = request.form['product_name']
+            # Extraire l'ID du produit si le format est "Nom ID" ou utiliser directement comme ID
+            product_id = product_name.split()[-1] if ' ' in product_name else product_name
             
-            # Trouver les données du produit dans le dataset
-            product_data = material_consumption_dataset[material_consumption_dataset['FK_product'].astype(str) == str(product_name.split('_')[0]) if 'productname' not in material_consumption_dataset.columns else material_consumption_dataset['productname'] == product_name]
+            # Filtrer les données en utilisant 'FK_product' ou 'productname' selon disponibilité
+            if 'productname' in material_consumption_dataset.columns:
+                product_data = material_consumption_dataset[material_consumption_dataset['productname'] == product_name]
+            else:
+                product_data = material_consumption_dataset[material_consumption_dataset['FK_product'].astype(str) == str(product_id)]
+            
             if product_data.empty:
                 return render_template('test_model.html',
                                      axis='production',
