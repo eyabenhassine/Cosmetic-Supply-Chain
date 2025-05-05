@@ -1,189 +1,194 @@
 <!DOCTYPE html>
-<html lang="fr">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tester {{ model_name }} - {{ axis|capitalize }}</title>
+    <title>Test Model - {{ model_name }}</title>
     <style>
         body {
             font-family: Arial, sans-serif;
-            background-color: #f4f7f6;
             margin: 0;
             padding: 0;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
+            background-color: #f4f4f4;
         }
         .container {
-            background-color: white;
-            padding: 20px;
-            border-radius: 10px;
-            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
             width: 80%;
-            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        h1 {
+            color: #333;
             text-align: center;
         }
-        h1, h2, h3 {
-            color: #333;
+        .form-section, .results-section, .navigation-section {
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
             margin-bottom: 20px;
         }
-        form {
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-        }
-        label {
+        .form-section label {
+            display: block;
+            margin-bottom: 5px;
             font-weight: bold;
-            color: #555;
         }
-        input, select {
-            padding: 8px;
-            border: 1px solid #ddd;
-            border-radius: 5px;
+        .form-section input[type="text"],
+        .form-section input[type="number"],
+        .form-section select {
             width: 100%;
+            padding: 8px;
+            margin-bottom: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
             box-sizing: border-box;
         }
-        button {
-            padding: 10px;
-            background-color: #007bff;
-            color: white;
+        .form-section input[type="submit"] {
+            background-color: #28a745;
+            color: #fff;
+            padding: 10px 20px;
             border: none;
-            border-radius: 5px;
+            border-radius: 4px;
             cursor: pointer;
-            transition: background-color 0.3s;
         }
-        button:hover {
-            background-color: #0056b3;
+        .form-section input[type="submit"]:hover {
+            background-color: #218838;
         }
-        .result {
-            margin-top: 20px;
-            padding: 10px;
-            border: 1px solid #ddd;
-            border-radius: 5px;
-            background-color: #f9f9f9;
-        }
-        .result p {
-            margin: 0;
+        .results-section h2 {
             color: #333;
+            font-size: 1.5em;
         }
-        .error {
-            color: red;
-            margin-top: 10px;
-        }
-        .back-button {
-            margin-top: 20px;
-            padding: 10px;
-            background-color: #6c757d;
-            color: white;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            text-decoration: none;
-            display: inline-block;
-            transition: background-color 0.3s;
-        }
-        .back-button:hover {
-            background-color: #5a6268;
-        }
-        img {
-            max-width: 100%;
-            margin-top: 20px;
+        .results-section p {
+            font-size: 1.1em;
         }
         .recommendation-table {
             width: 100%;
             border-collapse: collapse;
-            margin-top: 20px;
+            margin-top: 10px;
         }
         .recommendation-table th, .recommendation-table td {
             border: 1px solid #ddd;
             padding: 8px;
-            text-align: center;
+            text-align: left;
         }
         .recommendation-table th {
             background-color: #f2f2f2;
-            color: #333;
+            font-weight: bold;
+        }
+        .plot-image {
+            max-width: 100%;
+            height: auto;
+            margin-top: 20px;
+        }
+        .preview-section {
+            margin-top: 20px;
+        }
+        .navigation-section a {
+            display: inline-block;
+            background-color: #007bff;
+            color: #fff;
+            padding: 10px 20px;
+            text-decoration: none;
+            border-radius: 4px;
+        }
+        .navigation-section a:hover {
+            background-color: #0056b3;
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>Tester {{ model_name }} - {{ axis|capitalize }}</h1>
+        <h1>Test du modèle : {{ model_name }}</h1>
 
-        {% if fields and fields|length > 0 %}
-        <form action="/predict/{{ axis }}/{{ model_id }}" method="POST">
-            {% for field in fields %}
-            <div>
-                <label for="{{ field }}">{{ field|replace('_', ' ')|capitalize }}:</label>
-                {% if field == 'FK_shop' %}
-                <select id="{{ field }}" name="{{ field }}" required>
-                    {% for shop in shops %}
-                    <option value="{{ shop }}" {% if shop == FK_shop %}selected{% endif %}>{{ shop }}</option>
-                    {% endfor %}
-                </select>
-                {% elif field == 'shop_name' %}
-                <select id="{{ field }}" name="{{ field }}" required>
-                    {% for shop_id, shop_name in shop_mapping.items() %}
-                    <option value="{{ shop_name }}" {% if shop_name == shop_name %}selected{% endif %}>{{ shop_name }}</option>
-                    {% endfor %}
-                </select>
-                {% elif field == 'product_name' %}
-                <select id="{{ field }}" name="{{ field }}" required>
-                    {% for product_name in product_names %}
-                    <option value="{{ product_name }}" {% if product_name == product_name %}selected{% endif %}>{{ product_name }}</option>
-                    {% endfor %}
-                </select>
-                {% elif field == 'date' %}
-                <input type="date" id="{{ field }}" name="{{ field }}" value="{{ date if date else '2025-06-01' }}" required>
-                {% elif field == 'quantity_used' %}
-                <input type="number" id="{{ field }}" name="{{ field }}" step="any" value="{{ quantity_used if quantity_used else '' }}" required>
-                {% else %}
-                <input type="{{ 'number' if field in ['quantity', 'unit_price', 'total', 'n_neighbors', 'top_n', 'month', 'FK_product'] else 'text' }}"
-                       id="{{ field }}"
-                       name="{{ field }}"
-                       value="{{ request.form[field] if request.form[field] else '' }}"
-                       required>
-                {% endif %}
-            </div>
-            {% endfor %}
-            <button type="submit">Prédire</button>
-        </form>
-        {% endif %}
-
-        {% if cluster_counts %}
-        <h3>Répartition des produits</h3>
-        <div>{{ cluster_counts|safe }}</div>
-        {% endif %}
-
-        {% if preview %}
-        <h3>Aperçu des produits</h3>
-        <div>{{ preview|safe }}</div>
-        {% endif %}
-
-        {% if prediction %}
-        <div class="result">
-            <h2>Résultat:</h2>
-            <p>{{ prediction|safe }}</p>
+        <!-- Formulaire pour tester le modèle -->
+        <div class="form-section">
+            <form method="POST">
+                {% for field in fields %}
+                    <label for="{{ field }}">{{ field.replace('_', ' ').title() }}:</label>
+                    {% if field == 'FK_shop' or field == 'shop_id' %}
+                        <select name="{{ field }}" id="{{ field }}" required>
+                            {% for shop in shops %}
+                                <option value="{{ shop }}" {% if shop == (shop_id if field == 'shop_id' else FK_shop) %}selected{% endif %}>
+                                    {{ shop }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    {% elif field == 'product_name' %}
+                        <select name="{{ field }}" id="{{ field }}" required>
+                            {% for product in product_names %}
+                                <option value="{{ product }}" {% if product == product_name %}selected{% endif %}>
+                                    {{ product }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    {% elif field == 'month' %}
+                        <select name="{{ field }}" id="{{ field }}" required>
+                            {% for month in range(1, 13) %}
+                                <option value="{{ month }}" {% if month == month %}selected{% endif %}>
+                                    {{ month }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    {% elif field == 'n_neighbors' %}
+                        <input type="number" name="{{ field }}" id="{{ field }}" value="{{ n_neighbors if n_neighbors else 3 }}" min="1" required>
+                    {% elif field == 'top_n' %}
+                        <input type="number" name="{{ field }}" id="{{ field }}" value="{{ top_n if top_n else 5 }}" min="1" required>
+                    {% else %}
+                        <input type="{{ 'number' if field in ['quantity', 'unit_price', 'total', 'FK_product', 'quantity_used'] else 'text' }}"
+                               name="{{ field }}"
+                               id="{{ field }}"
+                               value="{{ request.form[field] if request.form[field] is defined else (quantity if field == 'quantity' else unit_price if field == 'unit_price' else total if field == 'total' else FK_product if field == 'FK_product' else quantity_used if field == 'quantity_used' else '') }}"
+                               step="{{ '0.01' if field in ['quantity', 'unit_price', 'total', 'quantity_used'] else 'any' }}"
+                               required>
+                    {% endif %}
+                {% endfor %}
+                <input type="submit" value="Prédire">
+            </form>
         </div>
-        {% endif %}
 
-        {% if graphic %}
-        <img src="data:image/png;base64,{{ graphic }}" alt="Graphique de recommandations">
-        {% endif %}
+        <!-- Afficher les résultats ou les visualisations -->
+        <div class="results-section">
+            {% if prediction %}
+                <h2>Résultat de la prédiction :</h2>
+                <p>{{ prediction | safe }}</p>
+            {% endif %}
 
-        {% if curve_plot %}
-        <img src="data:image/png;base64,{{ curve_plot }}" alt="Courbe historique et prédite">
-        {% endif %}
+            {% if graphic %}
+                <h2>Visualisation :</h2>
+                <img src="data:image/png;base64,{{ graphic }}" alt="Graphique de recommandation" class="plot-image">
+            {% endif %}
 
-        {% if hist_plot %}
-        <img src="data:image/png;base64,{{ hist_plot }}" alt="Histogramme des quantités prédites">
-        {% endif %}
+            {% if curve_plot %}
+                <h2>Graphique de prévision :</h2>
+                <img src="data:image/png;base64,{{ curve_plot }}" alt="Courbe de prévision" class="plot-image">
+            {% endif %}
 
-        {% if seasonal_plot %}
-        <img src="data:image/png;base64,{{ seasonal_plot }}" alt="Variation saisonnière">
-        {% endif %}
+            {% if hist_plot %}
+                <h2>Distribution des quantités prédites :</h2>
+                <img src="data:image/png;base64,{{ hist_plot }}" alt="Histogramme des quantités prédites" class="plot-image">
+            {% endif %}
 
-        <a href="/axis/{{ axis }}" class="back-button">Retour aux modèles</a>
+            {% if seasonal_plot %}
+                <h2>Variation saisonnière :</h2>
+                <img src="data:image/png;base64,{{ seasonal_plot }}" alt="Variation saisonnière" class="plot-image">
+            {% endif %}
+
+            {% if cluster_counts %}
+                <h2>Répartition des clusters :</h2>
+                <p>{{ cluster_counts | safe }}</p>
+            {% endif %}
+
+            {% if preview %}
+                <div class="preview-section">
+                    <h2>Aperçu des données :</h2>
+                    <p>{{ preview | safe }}</p>
+                </div>
+            {% endif %}
+        </div>
+
+        <!-- Bouton de retour aux autres modèles de l'axe -->
+        <div class="navigation-section">
+            <a href="/axis/{{ axis }}">Retour aux modèles pour {{ axis }}</a>
+        </div>
     </div>
 </body>
 </html>
