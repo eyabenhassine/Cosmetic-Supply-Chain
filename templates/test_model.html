@@ -120,6 +120,30 @@
                                 </option>
                             {% endfor %}
                         </select>
+                    {% elif field == 'product_category' %}
+                        <select name="{{ field }}" id="{{ field }}" required>
+                            {% for category in categories %}
+                                <option value="{{ category }}" {% if category == product_category %}selected{% endif %}>
+                                    {{ category }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    {% elif field == 'product_brand' %}
+                        <select name="{{ field }}" id="{{ field }}" required>
+                            {% for brand in brands %}
+                                <option value="{{ brand }}" {% if brand == product_brand %}selected{% endif %}>
+                                    {{ brand }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    {% elif field == 'warehousename' %}
+                        <select name="{{ field }}" id="{{ field }}" required>
+                            {% for warehouse in warehouses %}
+                                <option value="{{ warehouse }}" {% if warehouse == warehousename %}selected{% endif %}>
+                                    {{ warehouse }}
+                                </option>
+                            {% endfor %}
+                        </select>
                     {% elif field == 'month' %}
                         <select name="{{ field }}" id="{{ field }}" required>
                             {% for month in range(1, 13) %}
@@ -133,11 +157,11 @@
                     {% elif field == 'top_n' %}
                         <input type="number" name="{{ field }}" id="{{ field }}" value="{{ top_n if top_n else 5 }}" min="1" required>
                     {% else %}
-                        <input type="{{ 'number' if field in ['quantity', 'unit_price', 'total', 'FK_product', 'quantity_used'] else 'text' }}"
+                        <input type="{{ 'number' if field in ['quantity', 'unit_price', 'total', 'FK_product', 'quantity_used', 'stock_capacity', 'sales_quantity', 'sales_total'] else 'text' }}"
                                name="{{ field }}"
                                id="{{ field }}"
-                               value="{{ request.form[field] if request.form[field] is defined else (quantity if field == 'quantity' else unit_price if field == 'unit_price' else total if field == 'total' else FK_product if field == 'FK_product' else quantity_used if field == 'quantity_used' else '') }}"
-                               step="{{ '0.01' if field in ['quantity', 'unit_price', 'total', 'quantity_used'] else 'any' }}"
+                               value="{{ request.form[field] if request.form[field] is defined else (quantity if field == 'quantity' else unit_price if field == 'unit_price' else total if field == 'total' else FK_product if field == 'FK_product' else quantity_used if field == 'quantity_used' else stock_capacity if field == 'stock_capacity' else sales_quantity if field == 'sales_quantity' else sales_total if field == 'sales_total' else '') }}"
+                               step="{{ '0.01' if field in ['quantity', 'unit_price', 'total', 'quantity_used', 'stock_capacity', 'sales_quantity', 'sales_total'] else 'any' }}"
                                required>
                     {% endif %}
                 {% endfor %}

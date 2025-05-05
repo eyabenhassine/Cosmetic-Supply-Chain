@@ -4,8 +4,9 @@ from flask import Flask, request, render_template # type: ignore
 import numpy as np
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, LabelEncoder
 from sklearn.cluster import KMeans
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_squared_error, r2_score
 from imblearn.over_sampling import SMOTE
 from sqlalchemy import create_engine
 from sklearn.neighbors import NearestNeighbors
@@ -380,7 +381,6 @@ def train_and_save_models():
     kmeans_prod = KMeans(n_clusters=2, random_state=42)
     kmeans_prod.fit(product_consumption[['TotalConsumption_scaled']])
     
-    # Déterminer les étiquettes des clusters
     product_consumption['Cluster'] = kmeans_prod.labels_
     cluster_means = product_consumption.groupby('Cluster')['TotalConsumption'].mean()
     low_cluster = cluster_means.idxmin()
@@ -427,7 +427,9 @@ def train_and_save_models():
     merged_rf['QuantityUsed'] = merged_rf['QuantityUsed'].apply(convert_to_float)
     merged_rf['QuantityUsed'] = merged_rf['QuantityUsed'].fillna(merged_rf['QuantityUsed'].median())
     
-    product_consumption_rf = merged_rf.groupby('FK_product')['QuantityUsed'].sum().reset_index()
+    # Vérifier si 'FK_product' ou 'PK_Products' existe
+    product_id_col = 'FK_product' if 'FK_product' in merged_rf.columns else 'PK_Products'
+    product_consumption_rf = merged_rf.groupby(product_id_col)['QuantityUsed'].sum().reset_index()
     product_consumption_rf.columns = ['ProductID', 'TotalConsumption']
     
     threshold = product_consumption_rf['TotalConsumption'].median()
@@ -435,13 +437,17 @@ def train_and_save_models():
         lambda x: 1 if x >= threshold else 0
     )
     
-    dataset = product_consumption_rf.merge(merged_rf[['FK_product', 'Dosage', 'QuantityUsed', 'productname', 'category', 'Material_Category']], 
-                                          on='FK_product', how='left')
+    dataset = product_consumption_rf.merge(
+        merged_rf[[product_id_col, 'Dosage', 'QuantityUsed', 'productname', 'category', 'Material_Category']], 
+        left_on='ProductID', right_on=product_id_col, how='left'
+    )
     
     label_encoder_cat = LabelEncoder()
+    dataset['category'] = dataset['category'].fillna('Unknown')
     dataset['category'] = label_encoder_cat.fit_transform(dataset['category'])
     
     label_encoder_mat = LabelEncoder()
+    dataset['Material_Category'] = dataset['Material_Category'].fillna('Unknown')
     dataset['Material_Category'] = label_encoder_mat.fit_transform(dataset['Material_Category'])
     
     X = dataset[['Dosage', 'QuantityUsed', 'category', 'Material_Category']]
@@ -465,9 +471,87 @@ def train_and_save_models():
     joblib.dump(dataset, 'material_consumption_dataset.pkl')
     print("Material Consumption Classification model trained.")
 
+    # Stock Model: Stock Prediction
+    print("Training Stock Prediction model...")
+    query_stock = """
+    SELECT 
+        fs."FK_product",
+        fs."FK_warehouse",
+        AVG(fs."Quantity") AS stock_quantity,
+        AVG(fs."Capacity") AS stock_capacity,
+        SUM(s.quantity) AS sales_quantity,
+        AVG(s.unit_price) AS unit_price,
+        SUM(s.total) AS sales_total,
+        cp."category" AS product_category,
+        cp."brandname" AS product_brand,
+        w."warehousename",
+        d.year,
+        d.month
+    FROM fact_stock fs
+    LEFT JOIN "Fact_sales" s ON fs."FK_product" = s."FK_product"
+    LEFT JOIN "Dim_Cosmetic_Products" cp ON fs."FK_product" = cp."PK_Products"
+    LEFT JOIN "Dim_Warehouse" w ON fs."FK_warehouse" = w."PK_Warehouse"
+    LEFT JOIN dim_date d ON s."FK_date" = d.pk_dates
+    GROUP BY fs."FK_product", fs."FK_warehouse", cp."category", cp."brandname", w."warehousename", d.year, d.month
+    """
+    df_stock = pd.read_sql(query_stock, engine) if engine else pd.DataFrame({
+        'FK_product': [1, 2, 3, 4, 5],
+        'FK_warehouse': [101, 102, 103, 104, 105],
+        'stock_quantity': [100, 200, 150, 300, 250],
+        'stock_capacity': [500, 600, 550, 700, 650],
+        'sales_quantity': [50, 80, 60, 90, 70],
+        'unit_price': [10.0, 15.0, 12.0, 20.0, 18.0],
+        'sales_total': [500, 1200, 720, 1800, 1260],
+        'product_category': ['Hair Care', 'Body Care', 'Hair Care', 'Foot Care', 'Body Care'],
+        'product_brand': ['BrandA', 'BrandB', 'BrandA', 'BrandC', 'BrandB'],
+        'warehousename': ['WH1', 'WH2', 'WH3', 'WH4', 'WH5'],
+        'year': [2023, 2023, 2023, 2023, 2023],
+        'month': [1, 2, 3, 4, 5]
+    })
+
+    le_category_stock = LabelEncoder()
+    le_brand_stock = LabelEncoder()
+    le_warehouse_stock = LabelEncoder()
+
+    df_stock['product_category_encoded'] = le_category_stock.fit_transform(df_stock['product_category'].fillna('Unknown'))
+    df_stock['product_brand_encoded'] = le_brand_stock.fit_transform(df_stock['product_brand'].fillna('Unknown'))
+    df_stock['warehousename_encoded'] = le_warehouse_stock.fit_transform(df_stock['warehousename'].fillna('Unknown'))
+
+    features = ['stock_capacity', 'sales_quantity', 'unit_price', 'sales_total',
+                'product_category_encoded', 'product_brand_encoded', 'warehousename_encoded']
+    target = 'stock_quantity'
+
+    X_stock = df_stock[features].fillna(df_stock[features].median())
+    y_stock = df_stock[target].fillna(df_stock[target].median())
+
+    X_train_stock, X_test_stock, y_train_stock, y_test_stock = train_test_split(X_stock, y_stock, test_size=0.2, random_state=42)
+
+    model_stock = RandomForestRegressor(n_estimators=200, random_state=42)
+    model_stock.fit(X_train_stock, y_train_stock)
+
+    y_pred_stock = model_stock.predict(X_test_stock)
+    mse_stock = mean_squared_error(y_test_stock, y_pred_stock)
+    r2_stock = r2_score(y_test_stock, y_pred_stock)
+    print(f"Stock Prediction - Mean Squared Error: {mse_stock:.2f}")
+    print(f"Stock Prediction - R² Score: {r2_stock:.2f}")
+
+    df_test_stock = X_test_stock.copy()
+    df_test_stock['y_test'] = y_test_stock
+    df_test_stock['y_pred'] = y_pred_stock
+    df_test_stock['FK_warehouse'] = df_stock.loc[X_test_stock.index, 'FK_warehouse']
+    df_test_stock['FK_product'] = df_stock.loc[X_test_stock.index, 'FK_product']
+
+    joblib.dump(model_stock, 'stock_prediction_model.pkl')
+    joblib.dump(le_category_stock, 'le_category.pkl')
+    joblib.dump(le_brand_stock, 'le_brand.pkl')
+    joblib.dump(le_warehouse_stock, 'le_warehouse.pkl')
+    joblib.dump(df_test_stock, 'stock_test_data.pkl')
+    print("Stock Prediction model trained and saved.")
+
     return (scaler, kmeans, rf, knn_model, pivot_table, predictions_df, historical_df, 
             scaler_prod, kmeans_prod, cluster_labels, product_consumption, 
-            scaler_rf_prod, rf_prod, label_encoder_cat, label_encoder_mat, dataset)
+            scaler_rf_prod, rf_prod, label_encoder_cat, label_encoder_mat, dataset,
+            model_stock, le_category_stock, le_brand_stock, le_warehouse_stock, df_test_stock)
 
 pkl_files = [
     'scaler_sales_clustering_sales.pkl',
@@ -485,14 +569,20 @@ pkl_files = [
     'scaler_material_consumption.pkl',
     'label_encoder_category.pkl',
     'label_encoder_material_category.pkl',
-    'material_consumption_dataset.pkl'
+    'material_consumption_dataset.pkl',
+    'stock_prediction_model.pkl',
+    'le_category.pkl',
+    'le_brand.pkl',
+    'le_warehouse.pkl',
+    'stock_test_data.pkl'
 ]
 print("Checking for .pkl files...")
 if not all(os.path.exists(pkl) for pkl in pkl_files):
     print("Some .pkl files are missing. Training models...")
     (scaler, kmeans, rf, knn_model, pivot_table, predictions_df, historical_df, 
      scaler_prod, kmeans_prod, cluster_labels, product_consumption, 
-     scaler_rf_prod, rf_prod, label_encoder_cat, label_encoder_mat, material_consumption_dataset) = train_and_save_models()
+     scaler_rf_prod, rf_prod, label_encoder_cat, label_encoder_mat, material_consumption_dataset,
+     model_stock, le_category_stock, le_brand_stock, le_warehouse_stock, df_test_stock) = train_and_save_models()
 else:
     print("Loading .pkl files...")
     scaler = joblib.load('scaler_sales_clustering_sales.pkl')
@@ -511,6 +601,11 @@ else:
     label_encoder_cat = joblib.load('label_encoder_category.pkl')
     label_encoder_mat = joblib.load('label_encoder_material_category.pkl')
     material_consumption_dataset = joblib.load('material_consumption_dataset.pkl')
+    model_stock = joblib.load('stock_prediction_model.pkl')
+    le_category_stock = joblib.load('le_category.pkl')
+    le_brand_stock = joblib.load('le_brand.pkl')
+    le_warehouse_stock = joblib.load('le_warehouse.pkl')
+    df_test_stock = joblib.load('stock_test_data.pkl')
 print(".pkl files processed.")
 
 SHOPS = ['41', '61', '81']
@@ -527,6 +622,43 @@ try:
 except Exception as e:
     print(f"Erreur lors de la récupération des ProductName: {e}")
     PRODUCT_NAMES = ['Hair Serum 1', 'Body Wash 2', 'Foot Cream 3', 'Conditioner 4', 'Eau de Toilette 5']
+
+# Récupérer la liste des catégories, marques et entrepôts pour l'axe Stock
+try:
+    query_categories = """
+    SELECT DISTINCT category
+    FROM public."Dim_Cosmetic_Products"
+    WHERE category IS NOT NULL
+    """
+    categories_df = pd.read_sql(query_categories, engine)
+    CATEGORIES = categories_df['category'].tolist()
+except Exception as e:
+    print(f"Erreur lors de la récupération des catégories: {e}")
+    CATEGORIES = ['Hair Care', 'Body Care', 'Foot Care']
+
+try:
+    query_brands = """
+    SELECT DISTINCT brandname
+    FROM public."Dim_Cosmetic_Products"
+    WHERE brandname IS NOT NULL
+    """
+    brands_df = pd.read_sql(query_brands, engine)
+    BRANDS = brands_df['brandname'].tolist()
+except Exception as e:
+    print(f"Erreur lors de la récupération des marques: {e}")
+    BRANDS = ['BrandA', 'BrandB', 'BrandC']
+
+try:
+    query_warehouses = """
+    SELECT DISTINCT warehousename
+    FROM public."Dim_Warehouse"
+    WHERE warehousename IS NOT NULL
+    """
+    warehouses_df = pd.read_sql(query_warehouses, engine)
+    WAREHOUSES = warehouses_df['warehousename'].tolist()
+except Exception as e:
+    print(f"Erreur lors de la récupération des entrepôts: {e}")
+    WAREHOUSES = ['WH1', 'WH2', 'WH3', 'WH4', 'WH5']
 
 @app.route('/')
 def home():
@@ -549,7 +681,10 @@ def axis(axis_name):
         ]
         return render_template('models.html', axis=axis_name, models=models)
     elif axis_name.lower() == 'stock':
-        return render_template('axis.html', axis=axis_name)
+        models = [
+            {'id': 'stock_prediction', 'name': 'Stock Prediction'}
+        ]
+        return render_template('models.html', axis=axis_name, models=models)
     else:
         return render_template('index.html', error="Axe non valide")
 
@@ -825,20 +960,18 @@ def predict_clustering_production():
 
 @app.route('/test_model/production/material_consumption_classification', methods=['GET', 'POST'])
 def test_material_consumption_classification():
-    # Préparer un tableau des prédictions pour tous les produits
     dataset_with_predictions = material_consumption_dataset.copy()
     X = dataset_with_predictions[['Dosage', 'QuantityUsed', 'category', 'Material_Category']]
     X_scaled = scaler_rf_prod.transform(X)
     dataset_with_predictions['Predicted_Label'] = rf_prod.predict(X_scaled)
     dataset_with_predictions['Consommation'] = dataset_with_predictions['Predicted_Label'].map({1: "Forte consommation", 0: "Faible consommation"})
     
-    # Vérifier si 'productname' existe dans le DataFrame, sinon utiliser 'FK_product' comme fallback
     preview_columns = ['TotalConsumption', 'Consommation']
     if 'productname' in dataset_with_predictions.columns:
         preview_columns.insert(0, 'productname')
     else:
-        preview_columns.insert(0, 'FK_product')
-        print("Warning: 'productname' not found in dataset_with_predictions, using 'FK_product' instead.")
+        preview_columns.insert(0, 'ProductID')
+        print("Warning: 'productname' not found in dataset_with_predictions, using 'ProductID' instead.")
     
     preview_data = dataset_with_predictions[preview_columns].head(5)
     preview_html = '<table class="recommendation-table">'
@@ -860,14 +993,12 @@ def test_material_consumption_classification():
     if request.method == 'POST':
         try:
             product_name = request.form['product_name']
-            # Extraire l'ID du produit si le format est "Nom ID" ou utiliser directement comme ID
             product_id = product_name.split()[-1] if ' ' in product_name else product_name
             
-            # Filtrer les données en utilisant 'FK_product' ou 'productname' selon disponibilité
             if 'productname' in material_consumption_dataset.columns:
                 product_data = material_consumption_dataset[material_consumption_dataset['productname'] == product_name]
             else:
-                product_data = material_consumption_dataset[material_consumption_dataset['FK_product'].astype(str) == str(product_id)]
+                product_data = material_consumption_dataset[material_consumption_dataset['ProductID'].astype(str) == str(product_id)]
             
             if product_data.empty:
                 return render_template('test_model.html',
@@ -879,11 +1010,9 @@ def test_material_consumption_classification():
                                      preview=preview_html,
                                      prediction=f'Erreur: Produit {product_name} non trouvé dans les données.')
             
-            # Extraire les features pour la prédiction
             input_data = product_data[['Dosage', 'QuantityUsed', 'category', 'Material_Category']].iloc[0:1]
             input_scaled = scaler_rf_prod.transform(input_data)
             
-            # Faire la prédiction
             prediction = rf_prod.predict(input_scaled)[0]
             prediction_label = "Forte consommation" if prediction == 1 else "Faible consommation"
             
@@ -912,6 +1041,87 @@ def test_material_consumption_classification():
                          fields=['product_name'],
                          product_names=PRODUCT_NAMES,
                          preview=preview_html)
+
+@app.route('/test_model/stock/stock_prediction', methods=['GET', 'POST'])
+def test_stock_prediction():
+    # Générer le graphique de comparaison réel vs prédit à partir des données de test
+    plt.figure(figsize=(8, 6))
+    sns.scatterplot(x='y_test', y='y_pred', data=df_test_stock, alpha=0.6)
+    plt.plot([df_test_stock['y_test'].min(), df_test_stock['y_test'].max()], 
+             [df_test_stock['y_test'].min(), df_test_stock['y_test'].max()], 'r--', lw=2)
+    plt.xlabel('Stock réel (y_test)')
+    plt.ylabel('Stock prédit (y_pred)')
+    plt.title('Comparaison des stocks réels et prédits')
+    plt.grid(True)
+    
+    buffer = io.BytesIO()
+    plt.savefig(buffer, format='png')
+    buffer.seek(0)
+    scatter_plot = base64.b64encode(buffer.getvalue()).decode('utf-8')
+    buffer.close()
+    plt.close()
+
+    if request.method == 'POST':
+        try:
+            stock_capacity = float(request.form['stock_capacity'])
+            sales_quantity = float(request.form['sales_quantity'])
+            unit_price = float(request.form['unit_price'])
+            sales_total = float(request.form['sales_total'])
+            product_category = request.form['product_category']
+            product_brand = request.form['product_brand']
+            warehousename = request.form['warehousename']
+
+            product_category_encoded = le_category_stock.transform([product_category])[0]
+            product_brand_encoded = le_brand_stock.transform([product_brand])[0]
+            warehousename_encoded = le_warehouse_stock.transform([warehousename])[0]
+
+            input_data = pd.DataFrame([[stock_capacity, sales_quantity, unit_price, sales_total,
+                                        product_category_encoded, product_brand_encoded, warehousename_encoded]],
+                                      columns=['stock_capacity', 'sales_quantity', 'unit_price', 'sales_total',
+                                               'product_category_encoded', 'product_brand_encoded', 'warehousename_encoded'])
+
+            prediction = model_stock.predict(input_data)[0]
+
+            return render_template('test_model.html',
+                                 axis='stock',
+                                 model_name='Stock Prediction',
+                                 model_id='stock_prediction',
+                                 fields=['stock_capacity', 'sales_quantity', 'unit_price', 'sales_total',
+                                         'product_category', 'product_brand', 'warehousename'],
+                                 categories=CATEGORIES,
+                                 brands=BRANDS,
+                                 warehouses=WAREHOUSES,
+                                 prediction=f'Quantité de stock prédite: {prediction:.2f}',
+                                 graphic=scatter_plot,
+                                 stock_capacity=stock_capacity,
+                                 sales_quantity=sales_quantity,
+                                 unit_price=unit_price,
+                                 sales_total=sales_total,
+                                 product_category=product_category,
+                                 product_brand=product_brand,
+                                 warehousename=warehousename)
+        except Exception as e:
+            return render_template('test_model.html',
+                                 axis='stock',
+                                 model_name='Stock Prediction',
+                                 model_id='stock_prediction',
+                                 fields=['stock_capacity', 'sales_quantity', 'unit_price', 'sales_total',
+                                         'product_category', 'product_brand', 'warehousename'],
+                                 categories=CATEGORIES,
+                                 brands=BRANDS,
+                                 warehouses=WAREHOUSES,
+                                 prediction=f'Erreur: {str(e)}',
+                                 graphic=scatter_plot)
+    return render_template('test_model.html',
+                         axis='stock',
+                         model_name='Stock Prediction',
+                         model_id='stock_prediction',
+                         fields=['stock_capacity', 'sales_quantity', 'unit_price', 'sales_total',
+                                 'product_category', 'product_brand', 'warehousename'],
+                         categories=CATEGORIES,
+                         brands=BRANDS,
+                         warehouses=WAREHOUSES,
+                         graphic=scatter_plot)
 
 if __name__ == '__main__':
     print("Starting Flask server...")
