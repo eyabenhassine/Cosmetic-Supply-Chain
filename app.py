@@ -1,8 +1,8 @@
 import pandas as pd
 import joblib
-from flask import Flask, request, render_template
+from flask import Flask, request, render_template # type: ignore
 import numpy as np
-from sklearn.preprocessing import StandardScaler, MinMaxScaler
+from sklearn.preprocessing import StandardScaler, MinMaxScaler, LabelEncoder
 from sklearn.cluster import KMeans
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
@@ -19,6 +19,7 @@ import base64
 import os
 import warnings
 import traceback
+import ast
 
 warnings.filterwarnings("ignore")
 
@@ -182,7 +183,7 @@ def train_sarima_model():
             all_predictions.append(forecast_df)
             print(f"Prediction DataFrame created for product ID {product_id}")
         except Exception as e:
-            print(f"Error fitting SARIMA model for product ID {product_id}: {e}")
+            print(f"Error fitting SARIMA model for product_id {product_id}: {e}")
             traceback.print_exc()
             continue
     
@@ -392,7 +393,81 @@ def train_and_save_models():
     joblib.dump(product_consumption, 'product_consumption.pkl')
     print("Clustering Production model trained.")
 
-    return (scaler, kmeans, rf, knn_model, pivot_table, predictions_df, historical_df, scaler_prod, kmeans_prod, cluster_labels, product_consumption)
+    # Production Model: Material Consumption Classification
+    print("Training Material Consumption Classification model...")
+    query_rf_prod = """
+    SELECT 
+        f."FK_product",
+        f."FK_base_material",
+        f."QuantityUsed",
+        f."Dosage",
+        p."PK_Products",
+        p."productname",
+        p."category",
+        m."PK_Base_Materials",
+        m."Material_Name",
+        m."Material_Category"
+    FROM "Fact_Production" f
+    JOIN "Dim_Cosmetic_Products" p ON f."FK_product" = p."PK_Products"
+    JOIN "Dim_Base_Materials" m ON f."FK_base_material" = m."PK_Base_Materials"
+    """
+    merged_rf = pd.read_sql(query_rf_prod, engine) if engine else pd.DataFrame({
+        'FK_product': [1, 2, 1, 3, 2],
+        'FK_base_material': [101, 102, 101, 103, 102],
+        'QuantityUsed': ['[10.0]', '[20.0]', '[15.0]', '[25.0]', '[30.0]'],
+        'Dosage': [0.1, 0.2, 0.15, 0.25, 0.3],
+        'PK_Products': [1, 2, 1, 3, 2],
+        'productname': ['ProductA', 'ProductB', 'ProductA', 'ProductC', 'ProductB'],
+        'category': ['Hair Care', 'Body Care', 'Hair Care', 'Foot Care', 'Body Care'],
+        'PK_Base_Materials': [101, 102, 101, 103, 102],
+        'Material_Name': ['Material1', 'Material2', 'Material1', 'Material3', 'Material2'],
+        'Material_Category': ['Oil', 'Cream', 'Oil', 'Powder', 'Cream']
+    })
+
+    merged_rf['QuantityUsed'] = merged_rf['QuantityUsed'].apply(convert_to_float)
+    merged_rf['QuantityUsed'] = merged_rf['QuantityUsed'].fillna(merged_rf['QuantityUsed'].median())
+    
+    product_consumption_rf = merged_rf.groupby('FK_product')['QuantityUsed'].sum().reset_index()
+    product_consumption_rf.columns = ['ProductID', 'TotalConsumption']
+    
+    threshold = product_consumption_rf['TotalConsumption'].median()
+    product_consumption_rf['Label'] = product_consumption_rf['TotalConsumption'].apply(
+        lambda x: 1 if x >= threshold else 0
+    )
+    
+    dataset = product_consumption_rf.merge(merged_rf[['FK_product', 'Dosage', 'QuantityUsed', 'productname', 'category', 'Material_Category']], 
+                                          on='FK_product', how='left')
+    
+    label_encoder_cat = LabelEncoder()
+    dataset['category'] = label_encoder_cat.fit_transform(dataset['category'])
+    
+    label_encoder_mat = LabelEncoder()
+    dataset['Material_Category'] = label_encoder_mat.fit_transform(dataset['Material_Category'])
+    
+    X = dataset[['Dosage', 'QuantityUsed', 'category', 'Material_Category']]
+    y = dataset['Label']
+    
+    X = X.fillna(X.median())
+    
+    scaler_rf_prod = StandardScaler()
+    X_scaled = scaler_rf_prod.fit_transform(X)
+    
+    X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.3, random_state=42)
+    
+    rf_prod = RandomForestClassifier(random_state=42)
+    rf_prod.fit(X_train, y_train)
+    
+    dataset['Consommation'] = dataset['Label'].map({1: "Forte consommation", 0: "Faible consommation"})
+    joblib.dump(rf_prod, 'rf_material_consumption.pkl')
+    joblib.dump(scaler_rf_prod, 'scaler_material_consumption.pkl')
+    joblib.dump(label_encoder_cat, 'label_encoder_category.pkl')
+    joblib.dump(label_encoder_mat, 'label_encoder_material_category.pkl')
+    joblib.dump(dataset, 'material_consumption_dataset.pkl')
+    print("Material Consumption Classification model trained.")
+
+    return (scaler, kmeans, rf, knn_model, pivot_table, predictions_df, historical_df, 
+            scaler_prod, kmeans_prod, cluster_labels, product_consumption, 
+            scaler_rf_prod, rf_prod, label_encoder_cat, label_encoder_mat, dataset)
 
 pkl_files = [
     'scaler_sales_clustering_sales.pkl',
@@ -405,12 +480,19 @@ pkl_files = [
     'scaler_production_clustering.pkl',
     'clustering_production.pkl',
     'cluster_labels_production.pkl',
-    'product_consumption.pkl'
+    'product_consumption.pkl',
+    'rf_material_consumption.pkl',
+    'scaler_material_consumption.pkl',
+    'label_encoder_category.pkl',
+    'label_encoder_material_category.pkl',
+    'material_consumption_dataset.pkl'
 ]
 print("Checking for .pkl files...")
 if not all(os.path.exists(pkl) for pkl in pkl_files):
     print("Some .pkl files are missing. Training models...")
-    (scaler, kmeans, rf, knn_model, pivot_table, predictions_df, historical_df, scaler_prod, kmeans_prod, cluster_labels, product_consumption) = train_and_save_models()
+    (scaler, kmeans, rf, knn_model, pivot_table, predictions_df, historical_df, 
+     scaler_prod, kmeans_prod, cluster_labels, product_consumption, 
+     scaler_rf_prod, rf_prod, label_encoder_cat, label_encoder_mat, material_consumption_dataset) = train_and_save_models()
 else:
     print("Loading .pkl files...")
     scaler = joblib.load('scaler_sales_clustering_sales.pkl')
@@ -424,14 +506,14 @@ else:
     kmeans_prod = joblib.load('clustering_production.pkl')
     cluster_labels = joblib.load('cluster_labels_production.pkl')
     product_consumption = joblib.load('product_consumption.pkl')
+    scaler_rf_prod = joblib.load('scaler_material_consumption.pkl')
+    rf_prod = joblib.load('rf_material_consumption.pkl')
+    label_encoder_cat = joblib.load('label_encoder_category.pkl')
+    label_encoder_mat = joblib.load('label_encoder_material_category.pkl')
+    material_consumption_dataset = joblib.load('material_consumption_dataset.pkl')
 print(".pkl files processed.")
 
 SHOPS = ['41', '61', '81']
-SHOP_MAPPING = {
-    '41': 'Magasin Paris',
-    '61': 'Magasin Lyon',
-    '81': 'Magasin Marseille'
-}
 
 # Récupérer la liste des ProductName
 try:
@@ -444,7 +526,7 @@ try:
     PRODUCT_NAMES = products_df['productname'].tolist()
 except Exception as e:
     print(f"Erreur lors de la récupération des ProductName: {e}")
-    PRODUCT_NAMES = ['Hair Serum 1', 'Body Wash 2', 'Foot Cream 3', 'Conditioner 4', 'Eau de Toilette 5']  # Valeurs par défaut
+    PRODUCT_NAMES = ['Hair Serum 1', 'Body Wash 2', 'Foot Cream 3', 'Conditioner 4', 'Eau de Toilette 5']
 
 @app.route('/')
 def home():
@@ -462,7 +544,8 @@ def axis(axis_name):
         return render_template('models.html', axis=axis_name, models=models)
     elif axis_name.lower() == 'production':
         models = [
-            {'id': 'clustering_production', 'name': 'Clustering Production'}
+            {'id': 'clustering_production', 'name': 'Clustering Production'},
+            {'id': 'material_consumption_classification', 'name': 'Material Consumption Classification'}
         ]
         return render_template('models.html', axis=axis_name, models=models)
     elif axis_name.lower() == 'stock':
@@ -544,14 +627,12 @@ def test_demand_prediction_sales():
 def test_product_recommendation_sales():
     if request.method == 'POST':
         try:
-            shop_name = request.form['shop_name']
-            # Convertir shop_name en shop_id
-            shop_id = next(key for key, value in SHOP_MAPPING.items() if value == shop_name)
+            shop_id = int(request.form['shop_id'])
             n_neighbors = int(request.form['n_neighbors'])
             top_n = int(request.form['top_n'])
 
             recommendations, error = recommend_products_knn(
-                shop_id=int(shop_id),
+                shop_id=shop_id,
                 pivot_table=pivot_table,
                 knn_model=knn_model,
                 top_n=top_n,
@@ -563,10 +644,10 @@ def test_product_recommendation_sales():
                                      axis='sales',
                                      model_name='Product Recommendation Sales',
                                      model_id='product_recommendation_sales',
-                                     fields=['shop_name', 'n_neighbors', 'top_n'],
-                                     shop_mapping=SHOP_MAPPING,
+                                     fields=['shop_id', 'n_neighbors', 'top_n'],
+                                     shops=SHOPS,
                                      prediction=f'Erreur: {error}',
-                                     shop_name=shop_name,
+                                     shop_id=shop_id,
                                      n_neighbors=n_neighbors,
                                      top_n=top_n)
 
@@ -583,11 +664,11 @@ def test_product_recommendation_sales():
                                  axis='sales',
                                  model_name='Product Recommendation Sales',
                                  model_id='product_recommendation_sales',
-                                 fields=['shop_name', 'n_neighbors', 'top_n'],
-                                 shop_mapping=SHOP_MAPPING,
+                                 fields=['shop_id', 'n_neighbors', 'top_n'],
+                                 shops=SHOPS,
                                  prediction=table_html,
                                  graphic=graphic,
-                                 shop_name=shop_name,
+                                 shop_id=shop_id,
                                  n_neighbors=n_neighbors,
                                  top_n=top_n)
         except Exception as e:
@@ -595,18 +676,18 @@ def test_product_recommendation_sales():
                                  axis='sales',
                                  model_name='Product Recommendation Sales',
                                  model_id='product_recommendation_sales',
-                                 fields=['shop_name', 'n_neighbors', 'top_n'],
-                                 shop_mapping=SHOP_MAPPING,
+                                 fields=['shop_id', 'n_neighbors', 'top_n'],
+                                 shops=SHOPS,
                                  prediction=f'Erreur: {str(e)}',
-                                 shop_name=request.form.get('shop_name', ''),
+                                 shop_id=request.form.get('shop_id', ''),
                                  n_neighbors=request.form.get('n_neighbors', ''),
                                  top_n=request.form.get('top_n', ''))
     return render_template('test_model.html',
                          axis='sales',
                          model_name='Product Recommendation Sales',
                          model_id='product_recommendation_sales',
-                         fields=['shop_name', 'n_neighbors', 'top_n'],
-                         shop_mapping=SHOP_MAPPING)
+                         fields=['shop_id', 'n_neighbors', 'top_n'],
+                         shops=SHOPS)
 
 @app.route('/test_model/sales/time_series_forecast_sales', methods=['GET'])
 def test_time_series_forecast_sales():
@@ -639,7 +720,6 @@ def test_time_series_forecast_sales():
 
 @app.route('/test_model/production/clustering_production', methods=['GET', 'POST'])
 def test_clustering_production():
-    # Préparer la répartition des clusters
     cluster_counts = product_consumption['Consommation'].value_counts().to_dict()
     cluster_counts_html = '<table class="recommendation-table">'
     cluster_counts_html += '<thead><tr><th>Consommation</th><th>Nombre de produits</th></tr></thead>'
@@ -648,7 +728,6 @@ def test_clustering_production():
         cluster_counts_html += f'<tr><td>{cons}</td><td>{count}</td></tr>'
     cluster_counts_html += '</tbody></table>'
 
-    # Préparer l'aperçu des produits (5 premiers)
     preview_data = product_consumption[['ProductName', 'TotalConsumption', 'Consommation']].head(5)
     preview_html = '<table class="recommendation-table">'
     preview_html += '<thead><tr><th>ProductName</th><th>TotalConsumption</th><th>Consommation</th></tr></thead>'
@@ -698,7 +777,6 @@ def test_clustering_production():
 
 @app.route('/predict/production/clustering_production', methods=['POST'])
 def predict_clustering_production():
-    # Préparer la répartition des clusters
     cluster_counts = product_consumption['Consommation'].value_counts().to_dict()
     cluster_counts_html = '<table class="recommendation-table">'
     cluster_counts_html += '<thead><tr><th>Consommation</th><th>Nombre de produits</th></tr></thead>'
@@ -707,7 +785,6 @@ def predict_clustering_production():
         cluster_counts_html += f'<tr><td>{cons}</td><td>{count}</td></tr>'
     cluster_counts_html += '</tbody></table>'
 
-    # Préparer l'aperçu des produits (5 premiers)
     preview_data = product_consumption[['ProductName', 'TotalConsumption', 'Consommation']].head(5)
     preview_html = '<table class="recommendation-table">'
     preview_html += '<thead><tr><th>ProductName</th><th>TotalConsumption</th><th>Consommation</th></tr></thead>'
@@ -745,6 +822,90 @@ def predict_clustering_production():
                              cluster_counts=cluster_counts_html,
                              preview=preview_html,
                              prediction=f'Erreur: {str(e)}')
+
+@app.route('/test_model/production/material_consumption_classification', methods=['GET', 'POST'])
+def test_material_consumption_classification():
+    # Préparer un tableau des prédictions pour tous les produits
+    dataset_with_predictions = material_consumption_dataset.copy()
+    X = dataset_with_predictions[['Dosage', 'QuantityUsed', 'category', 'Material_Category']]
+    X_scaled = scaler_rf_prod.transform(X)
+    dataset_with_predictions['Predicted_Label'] = rf_prod.predict(X_scaled)
+    dataset_with_predictions['Consommation'] = dataset_with_predictions['Predicted_Label'].map({1: "Forte consommation", 0: "Faible consommation"})
+    
+    # Vérifier si 'productname' existe dans le DataFrame, sinon utiliser 'FK_product' comme fallback
+    preview_columns = ['TotalConsumption', 'Consommation']
+    if 'productname' in dataset_with_predictions.columns:
+        preview_columns.insert(0, 'productname')
+    else:
+        preview_columns.insert(0, 'FK_product')
+        print("Warning: 'productname' not found in dataset_with_predictions, using 'FK_product' instead.")
+    
+    preview_data = dataset_with_predictions[preview_columns].head(5)
+    preview_html = '<table class="recommendation-table">'
+    preview_html += '<thead><tr>'
+    for col in preview_columns:
+        preview_html += f'<th>{col.replace("_", " ").title()}</th>'
+    preview_html += '</tr></thead>'
+    preview_html += '<tbody>'
+    for _, row in preview_data.iterrows():
+        preview_html += '<tr>'
+        for col in preview_columns:
+            value = row[col]
+            if col == 'TotalConsumption':
+                value = f"{value:.1f}"
+            preview_html += f'<td>{value}</td>'
+        preview_html += '</tr>'
+    preview_html += '</tbody></table>'
+
+    if request.method == 'POST':
+        try:
+            product_name = request.form['product_name']
+            
+            # Trouver les données du produit dans le dataset
+            product_data = material_consumption_dataset[material_consumption_dataset['FK_product'].astype(str) == str(product_name.split('_')[0]) if 'productname' not in material_consumption_dataset.columns else material_consumption_dataset['productname'] == product_name]
+            if product_data.empty:
+                return render_template('test_model.html',
+                                     axis='production',
+                                     model_name='Material Consumption Classification',
+                                     model_id='material_consumption_classification',
+                                     fields=['product_name'],
+                                     product_names=PRODUCT_NAMES,
+                                     preview=preview_html,
+                                     prediction=f'Erreur: Produit {product_name} non trouvé dans les données.')
+            
+            # Extraire les features pour la prédiction
+            input_data = product_data[['Dosage', 'QuantityUsed', 'category', 'Material_Category']].iloc[0:1]
+            input_scaled = scaler_rf_prod.transform(input_data)
+            
+            # Faire la prédiction
+            prediction = rf_prod.predict(input_scaled)[0]
+            prediction_label = "Forte consommation" if prediction == 1 else "Faible consommation"
+            
+            return render_template('test_model.html',
+                                 axis='production',
+                                 model_name='Material Consumption Classification',
+                                 model_id='material_consumption_classification',
+                                 fields=['product_name'],
+                                 product_names=PRODUCT_NAMES,
+                                 preview=preview_html,
+                                 prediction=f'Produit: {product_name}, Consommation: {prediction_label}',
+                                 product_name=product_name)
+        except Exception as e:
+            return render_template('test_model.html',
+                                 axis='production',
+                                 model_name='Material Consumption Classification',
+                                 model_id='material_consumption_classification',
+                                 fields=['product_name'],
+                                 product_names=PRODUCT_NAMES,
+                                 preview=preview_html,
+                                 prediction=f'Erreur: {str(e)}')
+    return render_template('test_model.html',
+                         axis='production',
+                         model_name='Material Consumption Classification',
+                         model_id='material_consumption_classification',
+                         fields=['product_name'],
+                         product_names=PRODUCT_NAMES,
+                         preview=preview_html)
 
 if __name__ == '__main__':
     print("Starting Flask server...")
