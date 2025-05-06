@@ -816,6 +816,57 @@ def test_clustering_production():
                          cluster_counts=cluster_counts_html,
                          preview=preview_html)
 
+<<<<<<< HEAD
+=======
+@app.route('/predict/production/clustering_production', methods=['POST'])
+def predict_clustering_production():
+    cluster_counts = product_consumption['Consommation'].value_counts().to_dict()
+    cluster_counts_html = '<table class="recommendation-table">'
+    cluster_counts_html += '<thead><tr><th>Consommation</th><th>Nombre de produits</th></tr></thead>'
+    cluster_counts_html += '<tbody>'
+    for cons, count in cluster_counts.items():
+        cluster_counts_html += f'<tr><td>{cons}</td><td>{count}</td></tr>'
+    cluster_counts_html += '</tbody></table>'
+
+    preview_data = product_consumption[['ProductName', 'TotalConsumption', 'Consommation']].head(5)
+    preview_html = '<table class="recommendation-table">'
+    preview_html += '<thead><tr><th>ProductName</th><th>TotalConsumption</th><th>Consommation</th></tr></thead>'
+    preview_html += '<tbody>'
+    for _, row in preview_data.iterrows():
+        preview_html += f'<tr><td>{row["ProductName"]}</td><td>{row["TotalConsumption"]:.1f}</td><td>{row["Consommation"]}</td></tr>'
+    preview_html += '</tbody></table>'
+
+    try:
+        product_name = request.form['product_name']
+        quantity_used = float(request.form['quantity_used'])
+        input_data = pd.DataFrame([[quantity_used]], columns=['TotalConsumption'])
+        input_scaled = scaler_prod.transform(input_data)
+        cluster = kmeans_prod.predict(input_scaled)[0]
+        cluster_label = cluster_labels.get(cluster, f"Cluster {cluster}")
+        prediction = f'Produit: {product_name}, Consommation: {cluster_label} pour QuantityUsed = {quantity_used}'
+        return render_template('test_model.html',
+                             axis='production',
+                             model_name='Clustering Production',
+                             model_id='clustering_production',
+                             fields=['product_name', 'quantity_used'],
+                             product_names=PRODUCT_NAMES,
+                             cluster_counts=cluster_counts_html,
+                             preview=preview_html,
+                             prediction=prediction,
+                             product_name=product_name,
+                             quantity_used=quantity_used)
+    except Exception as e:
+        return render_template('test_model.html',
+                             axis='production',
+                             model_name='Clustering Production',
+                             model_id='clustering_production',
+                             fields=['product_name', 'quantity_used'],
+                             product_names=PRODUCT_NAMES,
+                             cluster_counts=cluster_counts_html,
+                             preview=preview_html,
+                             prediction=f'Erreur: {str(e)}')
+
+>>>>>>> ace9e64209c78a540539c30511d5e56ec11afeb7
 @app.route('/test_model/production/material_consumption_classification', methods=['GET', 'POST'])
 def test_material_consumption_classification():
     # Préparer un tableau des prédictions pour tous les produits
@@ -906,6 +957,7 @@ def test_material_consumption_classification():
                          product_names=PRODUCT_NAMES,
                          preview=preview_html)
 
+<<<<<<< HEAD
 @app.route('/test_model/stock/stock_prediction', methods=['GET', 'POST'])
 def test_stock_prediction():
     model = None
@@ -1060,6 +1112,8 @@ def test_stock_prediction():
                          brands=BRANDS,
                          warehouses=WAREHOUSES)
 
+=======
+>>>>>>> ace9e64209c78a540539c30511d5e56ec11afeb7
 if __name__ == '__main__':
     print("Starting Flask server...")
     try:

@@ -120,6 +120,7 @@
                                 </option>
                             {% endfor %}
                         </select>
+<<<<<<< HEAD
                     {% elif field == 'product_category' %}
                         <select name="{{ field }}" id="{{ field }}" required>
                             {% for category in categories %}
@@ -144,6 +145,8 @@
                                 </option>
                             {% endfor %}
                         </select>
+=======
+>>>>>>> ace9e64209c78a540539c30511d5e56ec11afeb7
                     {% elif field == 'month' %}
                         <select name="{{ field }}" id="{{ field }}" required>
                             {% for month in range(1, 13) %}
@@ -157,11 +160,19 @@
                     {% elif field == 'top_n' %}
                         <input type="number" name="{{ field }}" id="{{ field }}" value="{{ top_n if top_n else 5 }}" min="1" required>
                     {% else %}
+<<<<<<< HEAD
                         <input type="{{ 'number' if field in ['quantity', 'unit_price', 'total', 'FK_product', 'quantity_used', 'stock_capacity', 'sales_quantity', 'sales_total'] else 'text' }}"
                                name="{{ field }}"
                                id="{{ field }}"
                                value="{{ request.form[field] if request.form[field] is defined else (quantity if field == 'quantity' else unit_price if field == 'unit_price' else total if field == 'total' else FK_product if field == 'FK_product' else quantity_used if field == 'quantity_used' else stock_capacity if field == 'stock_capacity' else sales_quantity if field == 'sales_quantity' else sales_total if field == 'sales_total' else '') }}"
                                step="{{ '0.01' if field in ['quantity', 'unit_price', 'total', 'quantity_used', 'stock_capacity', 'sales_quantity', 'sales_total'] else 'any' }}"
+=======
+                        <input type="{{ 'number' if field in ['quantity', 'unit_price', 'total', 'FK_product', 'quantity_used'] else 'text' }}"
+                               name="{{ field }}"
+                               id="{{ field }}"
+                               value="{{ request.form[field] if request.form[field] is defined else (quantity if field == 'quantity' else unit_price if field == 'unit_price' else total if field == 'total' else FK_product if field == 'FK_product' else quantity_used if field == 'quantity_used' else '') }}"
+                               step="{{ '0.01' if field in ['quantity', 'unit_price', 'total', 'quantity_used'] else 'any' }}"
+>>>>>>> ace9e64209c78a540539c30511d5e56ec11afeb7
                                required>
                     {% endif %}
                 {% endfor %}
