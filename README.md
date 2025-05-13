@@ -87,10 +87,15 @@ It combines technical, analytical, and innovative approaches to support smart su
 
 ---
 
-## 👨‍💻 Author
+## 👨‍💻 Authors
+
+**The Analytics**  
+Engineering Students – Business Intelligence Track  
+
+---
 
 **Eya Ben Hassine**  
-Engineering Student  – Business Intelligence Track  
+Engineering Student – Business Intelligence Track  
 📧 eyabenhassine@esprit.tn  
 🔗 [LinkedIn Profile](https://www.linkedin.com/in/ben-hassine-eya-b03726279/)
 
